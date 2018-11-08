@@ -5,7 +5,7 @@ services:
   - redis-server
 
 install:
-  - echo '{"host": "localhost", "db": 11}' > .redis.json
+  - echo '{"host":"localhost","db":11}' > .redis.json
   - pip install coverage coveralls
   - python3 setup.py install
 
