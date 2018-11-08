@@ -1,0 +1,16 @@
+language: python
+python: 3.5
+
+services:
+  - redis-server
+
+install:
+  - echo '{"host": "localhost", "db": 11}' > .redis.json
+  - pip install coverage coveralls
+  - python3 setup.py install
+
+script:
+  - coverage run --source=prometheus_distributed_client setup.py test
+
+after_success:
+  - coveralls
