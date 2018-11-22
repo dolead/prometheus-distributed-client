@@ -1,10 +1,15 @@
 import json
 from collections import defaultdict
 
-from prometheus_client import generate_latest, CollectorRegistry, CONTENT_TYPE_LATEST
-from prometheus_client import core as prom_core
+from prometheus_client import (generate_latest, CollectorRegistry,
+        CONTENT_TYPE_LATEST)
 
 from prometheus_distributed_client.metric_def import MetricType
+
+
+def tuplize(d, exclude_keys=None):
+    return tuple((key, value) for key, value in d.items()
+                 if exclude_keys is None or key not in exclude_keys)
 
 
 class AbstractMetricBackend:
@@ -38,10 +43,8 @@ class FlaskUtils:
 
     @staticmethod
     def flask_to_prometheus(metrics):
-        defs_labels_values = {
-            metric: metric.get_each_value()
-            for metric in metrics}
-        result = DcmEventsPrometheusExporter.to_http_response(defs_labels_values)
+        metrics_n_vals = {m: m.get_each_value() for m in metrics}
+        result = DcmEventsPrometheusExporter.to_http_response(metrics_n_vals)
         return result['body'].decode('utf-8')
 
 
@@ -64,7 +67,6 @@ class DcmEventsPrometheusExporter:
                 # translate to prometheus objects
                 yield from cls.to_prometheus_metrics_family(defs_labels_values)
         registry.register(Proxy)
-
         body = generate_latest(registry)
         return {'headers': {'Content-type': CONTENT_TYPE_LATEST},
                 'body': body}
@@ -72,25 +74,24 @@ class DcmEventsPrometheusExporter:
     @classmethod
     def to_prometheus_metrics_family(cls, defs_labels_values):
         for metric, labels_and_values in defs_labels_values.items():
-            # instantiate metric family
-            metrics_family_cls = cls._prom_cls(metric)
-            metrics_family = metrics_family_cls(
-                metric.name,  # name
-                metric.name,  # help
-                labels=metric.label_names
-            )
-            for labels_and_value in labels_and_values:
-                label_values = list(labels_and_value[0].values())
-                label_values = map(str, label_values)
-                value = labels_and_value[1]
-                metrics_family.add_metric(label_values, value)
-            yield metrics_family
+            sums = {}
+            if metric.metric_type is MetricType.HISTOGRAM:
+                sums = {tuplize(row[0]): row[1]
+                        for row in metric.get_values_for_key('sum')}
+                buckets = metric.get_bucket_values()
 
-    @classmethod
-    def _prom_cls(cls, metric):
-        return {MetricType.GAUGE: prom_core.GaugeMetricFamily,
-                MetricType.COUNTER: prom_core.CounterMetricFamily,
-        }[metric.metric_type]
+            metrics_family = metric.metrics_family
+            # instantiate metric family
+            for labels, value in labels_and_values:
+                label_values = list(map(str, labels.values()))
+                kwargs = {}
+                if metric.metric_type is MetricType.HISTOGRAM:
+                    metrics_family.add_metric(label_values,
+                            buckets=buckets[tuplize(labels, {'le'})],
+                            sum_value=sums[tuplize(labels, {'le'})])
+                else:
+                    metrics_family.add_metric(label_values, value, **kwargs)
+            yield metrics_family
 
 
 class PrometheusCommonBackend:
@@ -117,35 +118,22 @@ class PrometheusPushBackend(PrometheusCommonBackend):
     def accepts(metric):
         return metric.is_push
 
-    @staticmethod
-    def _metric_key(metric):
-        return metric.name
+    def inc(self, key, value, labels=None):
+        return self.redis_conn.hincrby(key, self.labels_dump(labels), value)
 
-    def inc(self, metric, value, labels=None):
-        self.redis_conn.hincrby(self._metric_key(metric),
-                                self.labels_dump(labels),
-                                value)
+    def dec(self, key, value, labels=None):
+        return self.redis_conn.hincrby(key, self.labels_dump(labels), -value)
 
-    def dec(self, metric, value, labels=None):
-        self.redis_conn.hincrby(self._metric_key(metric),
-                                self.labels_dump(labels),
-                                -value)
-
-    def set(self, metric, value, labels=None):
-        self.redis_conn.hset(self._metric_key(metric),
-                             self.labels_dump(labels),
-                             value)
-
-    def observe(self, metric, value, labels=None):
-        return self.set(metric, value, labels)
+    def set(self, key, value, labels=None):
+        return self.redis_conn.hset(key, self.labels_dump(labels), value)
 
     ## READ methods, to expose stats to Prometheus
     #
-    def get_each_value(self, metric):
-        key = self._metric_key(metric)
-        for labels_s, value in self.redis_conn.hgetall(key).items():
-            labels = self.labels_load(labels_s.decode())
-            yield labels, float(value.decode())
+    def get_each_value(self, keys):
+        for key in keys:
+            for labels_s, value in self.redis_conn.hgetall(key).items():
+                labels = self.labels_load(labels_s.decode())
+                yield labels, float(value.decode())
 
 
 class PrometheusPullBackend(PrometheusCommonBackend):
@@ -180,7 +168,8 @@ class PrometheusPullBackend(PrometheusCommonBackend):
 
     ## READ methods, to expose stats to Prometheus
     #
-    def get_each_value(self, metric):
-        for labels_s, value in self._all_values[metric].items():
-            labels = self.labels_load(labels_s)
-            yield labels, float(value)
+    def get_each_value(self, metrics):
+        for metric in metrics:
+            for labels_s, value in self._all_values[metric].items():
+                labels = self.labels_load(labels_s)
+                yield labels, float(value)

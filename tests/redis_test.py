@@ -28,7 +28,7 @@ class PDCTestCase(unittest.TestCase):
         _all_metrics_defs.clear()
         _all_metrics_backends.clear()
 
-    def test_redis(self):
+    def _test_export(self):
         metric1 = Metric('shruberry', 'shruberry', 'COUNTER')
         metric2 = Metric('fleshwound', 'fleshwound', 'COUNTER', {'cross': {}})
         metric1.inc()
@@ -48,3 +48,16 @@ fleshwound_total{cross=""} 1.0
 fleshwound_total{cross="eki"} 2.0
 fleshwound_total{cross="patang"} 1.0
 """, FlaskUtils.flask_to_prometheus([metric2]))
+
+    def test_histogram(self):
+        metric = Metric('saysni', 'saysni', 'HISTOGRAM',
+                        labels={'cross': {}}, buckets=(2.5,))
+        for i in range(5):
+            metric.observe(i)
+            metric.observe(5 - i, {'cross': 'cross'})
+            metric.observe(5 - 2 * i, {'cross': 'label'})
+
+        truc = FlaskUtils.flask_to_prometheus([metric])
+        import ipdb
+        ipdb.sset_trace()
+        self.assertEqual("", FlaskUtils.flask_to_prometheus([metric]))
