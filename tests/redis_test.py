@@ -50,6 +50,26 @@ fleshwound_total{cross="patang"} 1.0
 """, FlaskUtils.flask_to_prometheus([metric2]))
 
     def test_histogram(self):
+        self.maxDiff = None
+        expected_output = """# HELP saysni saysni
+# TYPE saysni histogram
+saysni_bucket{cross="",le="2.5"} 3.0
+saysni_bucket{cross="",le="+Inf"} 5.0
+saysni_count{cross=""} 5.0
+saysni_sum{cross=""} 10.0
+saysni_bucket{cross="cross",le="2.5"} 2.0
+saysni_bucket{cross="cross",le="+Inf"} 5.0
+saysni_count{cross="cross"} 5.0
+saysni_sum{cross="cross"} 15.0
+saysni_bucket{cross="label",le="2.5"} 3.0
+saysni_bucket{cross="label",le="+Inf"} 5.0
+saysni_count{cross="label"} 5.0
+saysni_sum{cross="label"} 5.0
+# TYPE saysni_created gauge
+saysni_created{cross=""} 1542994276.7633915
+saysni_created{cross="cross"} 1542994276.7634358
+saysni_created{cross="label"} 1542994276.7634456
+"""
         metric = Metric('saysni', 'saysni', 'HISTOGRAM',
                         labels={'cross': {}}, buckets=(2.5,))
         for i in range(5):
@@ -57,7 +77,4 @@ fleshwound_total{cross="patang"} 1.0
             metric.observe(5 - i, {'cross': 'cross'})
             metric.observe(5 - 2 * i, {'cross': 'label'})
 
-        truc = FlaskUtils.flask_to_prometheus([metric])
-        import ipdb
-        ipdb.sset_trace()
-        self.assertEqual("", FlaskUtils.flask_to_prometheus([metric]))
+        self.assertEqual(expected_output, FlaskUtils.flask_to_prometheus([metric]))

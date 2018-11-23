@@ -56,9 +56,12 @@ class Metric:
                 for bucket in self.buckets]
 
     def get_bucket_values(self):
+        bounds = dict(self.bucket_bounds)
         result = defaultdict(list)
         for labels, value in self.get_values_for_key('bucket', ['le']):
             result[tuplize(labels, {'le'})].append((labels['le'], value))
+        for key, buckets_value in result.items():
+            result[key] = sorted(buckets_value, key=lambda x: bounds[x[0]])
         return result
 
     @property
