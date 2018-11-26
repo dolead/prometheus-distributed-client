@@ -1,10 +1,11 @@
 import json
 from collections import defaultdict
 
-from prometheus_client import generate_latest, CollectorRegistry, CONTENT_TYPE_LATEST
-from prometheus_client import core as prom_core
+from prometheus_client import (generate_latest, CollectorRegistry,
+        CONTENT_TYPE_LATEST)
 
-from prometheus_distributed_client.metric_def import MetricType
+from prometheus_distributed_client.metric_def import (MetricType,
+        tuplize, OBSERVE_METRICS)
 
 
 class AbstractMetricBackend:
@@ -15,7 +16,7 @@ class AbstractMetricBackend:
         raise NotImplementedError()
 
     @staticmethod
-    def dev(metric, value, labels=None):
+    def dec(metric, value, labels=None):
         raise NotImplementedError()
 
     @staticmethod
@@ -38,10 +39,8 @@ class FlaskUtils:
 
     @staticmethod
     def flask_to_prometheus(metrics):
-        defs_labels_values = {
-            metric: metric.get_each_value()
-            for metric in metrics}
-        result = DcmEventsPrometheusExporter.to_http_response(defs_labels_values)
+        metrics_n_vals = {m: m.get_each_value() for m in metrics}
+        result = DcmEventsPrometheusExporter.to_http_response(metrics_n_vals)
         return result['body'].decode('utf-8')
 
 
@@ -64,7 +63,6 @@ class DcmEventsPrometheusExporter:
                 # translate to prometheus objects
                 yield from cls.to_prometheus_metrics_family(defs_labels_values)
         registry.register(Proxy)
-
         body = generate_latest(registry)
         return {'headers': {'Content-type': CONTENT_TYPE_LATEST},
                 'body': body}
@@ -72,39 +70,37 @@ class DcmEventsPrometheusExporter:
     @classmethod
     def to_prometheus_metrics_family(cls, defs_labels_values):
         for metric, labels_and_values in defs_labels_values.items():
+            if metric.metric_type in OBSERVE_METRICS:
+                sums = {tuplize(row[0]): row[1]
+                        for row in metric.get_values_for_key('sum')}
+            if metric.metric_type is MetricType.HISTOGRAM:
+                buckets = metric.get_bucket_values()
+
+            metrics_family = metric.metrics_family
             # instantiate metric family
-            metrics_family_cls = cls._prom_cls(metric)
-            metrics_family = metrics_family_cls(
-                metric.name,  # name
-                metric.name,  # help
-                labels=metric.label_names
-            )
-            for labels_and_value in labels_and_values:
-                label_values = list(labels_and_value[0].values())
-                label_values = map(str, label_values)
-                value = labels_and_value[1]
-                metrics_family.add_metric(label_values, value)
+            for labels, value in labels_and_values:
+                label_values = list(map(str, labels.values()))
+                if metric.metric_type is MetricType.HISTOGRAM:
+                    tuplized_labels = tuplize(labels, {'le'})
+                    metrics_family.add_metric(label_values,
+                            buckets=buckets[tuplized_labels],
+                            sum_value=sums[tuplized_labels])
+                elif metric.metric_type is MetricType.SUMMARY:
+                    metrics_family.add_metric(label_values,
+                            count_value=value,
+                            sum_value=sums[tuplize(labels, {'le'})])
+                else:
+                    metrics_family.add_metric(label_values, value)
+            if metric.metric_type in OBSERVE_METRICS:
+                createds = metric.get_values_for_key('created')
+                for labels, value in sorted(createds, key=lambda x: x[1]):
+                    metrics_family.add_sample(metric.name + '_created',
+                            dict(labels), value)
+
             yield metrics_family
 
-    @classmethod
-    def _prom_cls(cls, metric):
-        return {MetricType.GAUGE: prom_core.GaugeMetricFamily,
-                MetricType.COUNTER: prom_core.CounterMetricFamily,
-        }[metric.metric_type]
 
-
-class PrometheusCommonBackend:
-
-    @staticmethod
-    def labels_dump(labels=None):
-        return json.dumps(labels or {}, sort_keys=True)
-
-    @staticmethod
-    def labels_load(labels_s):
-        return json.loads(labels_s)
-
-
-class PrometheusPushBackend(PrometheusCommonBackend):
+class PrometheusRedisBackend(AbstractMetricBackend):
     """ Used for service-level counters, on a multiprocess env
         Therefore, will pre-aggregate metrics in redis before
     """
@@ -113,74 +109,30 @@ class PrometheusPushBackend(PrometheusCommonBackend):
         from redis import Redis
         self.redis_conn = Redis(**redis_creds)
 
+    # translate method
     @staticmethod
-    def accepts(metric):
-        return metric.is_push
+    def labels_dump(labels=None):
+        return json.dumps(labels or {}, sort_keys=True)
 
     @staticmethod
-    def _metric_key(metric):
-        return metric.name
+    def labels_load(labels_s):
+        return json.loads(labels_s)
 
-    def inc(self, metric, value, labels=None):
-        self.redis_conn.hincrby(self._metric_key(metric),
-                                self.labels_dump(labels),
-                                value)
+    # write method
+    def inc(self, key, value, labels=None):
+        return self.redis_conn.hincrby(key, self.labels_dump(labels), value)
 
-    def dec(self, metric, value, labels=None):
-        self.redis_conn.hincrby(self._metric_key(metric),
-                                self.labels_dump(labels),
-                                -value)
+    def dec(self, key, value, labels=None):
+        return self.redis_conn.hincrby(key, self.labels_dump(labels), -value)
 
-    def set(self, metric, value, labels=None):
-        self.redis_conn.hset(self._metric_key(metric),
-                             self.labels_dump(labels),
-                             value)
+    def set(self, key, value, labels=None):
+        return self.redis_conn.hset(key, self.labels_dump(labels), value)
 
-    def observe(self, metric, value, labels=None):
-        return self.set(metric, value, labels)
+    def set_once(self, key, value, labels=None):
+        return self.redis_conn.hsetnx(key, self.labels_dump(labels), value)
 
-    ## READ methods, to expose stats to Prometheus
-    #
-    def get_each_value(self, metric):
-        key = self._metric_key(metric)
+    # read method
+    def get_each_value(self, key):
         for labels_s, value in self.redis_conn.hgetall(key).items():
             labels = self.labels_load(labels_s.decode())
             yield labels, float(value.decode())
-
-
-class PrometheusPullBackend(PrometheusCommonBackend):
-    """ Used for service-level pull metrics
-    """
-    push_gateway_url = None
-    prom_handlers_cache = None
-
-    def __init__(self):
-        self._all_values = defaultdict(lambda: defaultdict(int))
-
-    @staticmethod
-    def accepts(metric):
-        return not metric.is_push
-
-    # Methods implemented as WRITE backend
-    #
-    def inc(self, metric, value=1, labels=None):
-        # cache value, expose later through collector
-        self._all_values[metric][self.labels_dump(labels)] += value
-
-    def dec(self, metric, value=1, labels=None):
-        # cache value, expose later through collector
-        self._all_values[metric][self.labels_dump(labels)] -= value
-
-    def set(self, metric, value, labels=None):
-        # cache value, expose later through collector
-        self._all_values[metric][self.labels_dump(labels)] = value
-
-    def observe(self, metric, value, labels=None):
-        return self.set(metric, value, labels)
-
-    ## READ methods, to expose stats to Prometheus
-    #
-    def get_each_value(self, metric):
-        for labels_s, value in self._all_values[metric].items():
-            labels = self.labels_load(labels_s)
-            yield labels, float(value)

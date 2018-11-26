@@ -1,5 +1,6 @@
-_all_metrics_defs = {}
+from collections import OrderedDict
 
+_all_metrics_defs = OrderedDict()
 _all_metrics_backends = {}
 
 
