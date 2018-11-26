@@ -16,6 +16,8 @@ class MetricType(Enum):
     SUMMARY = "SUMMARY"
     HISTOGRAM = "HISTOGRAM"
 
+OBSERVE_METRICS = {MetricType.SUMMARY, MetricType.HISTOGRAM}
+
 
 def tuplize(d, exclude_keys=None):
     return tuple((key, value) for key, value in d.items()
@@ -25,16 +27,19 @@ def tuplize(d, exclude_keys=None):
 
 class Metric:
 
-    def __init__(self, name, documentation, metric_type,
+    def __init__(self, name, documentation=None, metric_type=None,
                  labels=None, buckets=None):
-        self.created = time.time()
+        self.created = {}
+        self.accepted_backends = []
         self.name = name
         self.documentation = documentation
         self.labels = labels or {}
         self.metric_type = metric_type
         self.buckets = None
+        self.samples = []
         if not isinstance(self.metric_type, MetricType):
             self.metric_type = MetricType(self.metric_type)
+        # handling buckets for histograms
         if self.metric_type is MetricType.HISTOGRAM:
             assert buckets, "buckets are needed for histogram"
             buckets = [float(b) for b in buckets]
@@ -64,10 +69,6 @@ class Metric:
             result[key] = sorted(buckets_value, key=lambda x: bounds[x[0]])
         return result
 
-    @property
-    def is_push(self):
-        return self.metric_type is MetricType.COUNTER
-
     __family_mapping = {MetricType.GAUGE: prometheus_core.GaugeMetricFamily,
             MetricType.COUNTER: prometheus_core.CounterMetricFamily,
             MetricType.SUMMARY: prometheus_core.SummaryMetricFamily,
@@ -89,9 +90,17 @@ class Metric:
     def set(self, value, labels=None):
         return self._call_backends('set', self.name, value, labels)
 
+    def set_once(self, value, labels=None):
+        return self._call_backends('set_once', self.name, value, labels)
+
     def observe(self, value, labels=None):
         self._call_backends('inc', self.name + '_count', 1, labels)
         self._call_backends('inc', self.name + '_sum', value, labels)
+        tuplized_labels = () if not labels else tuplize(labels)
+        if tuplized_labels not in self.created:
+            self.created[tuplized_labels] = time.time()
+            self._call_backends('set_once', self.name + '_created',
+                                self.created[tuplized_labels], labels)
         if self.metric_type is not MetricType.HISTOGRAM:
             return
         labels = labels.copy() if labels else {}
@@ -104,15 +113,15 @@ class Metric:
     @property
     def my_backend(self):
         # For now, only one backend per metric (simplier this way)
-        for _, bk_instance in each_metric_backend():
-            if bk_instance.accepts(self):
+        for name, bk_instance in each_metric_backend():
+            if not self.accepted_backends or name in self.accepted_backends:
                 return bk_instance
 
     def get_values_for_key(self, suffix='', extra_label_names=None):
         key = ('%s_%s' % (self.name, suffix)) if suffix else self.name
         label_names = self.label_names + (extra_label_names or [])
         values = defaultdict(int)
-        for labels, value in self.my_backend.get_each_value([key]):
+        for labels, value in self.my_backend.get_each_value(key):
             labels = tuple(map(str, (labels.get(label_name, '')
                                             for label_name in label_names)))
             values[labels] += value
@@ -127,7 +136,7 @@ class Metric:
         if not self.my_backend:
             return
         # to avoid doubles, will hash them and sum them before returning them
-        if self.metric_type in {MetricType.HISTOGRAM, MetricType.SUMMARY}:
+        if self.metric_type in OBSERVE_METRICS:
             yield from self.get_values_for_key('count')
         else:
             yield from self.get_values_for_key()
