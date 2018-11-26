@@ -9,7 +9,7 @@ def test_suite():
 
 
 setup(name='prometheus-distributed-client',
-      version='0.1.0',
+      version='0.2.0',
       description='',
       classifiers=[
           "Programming Language :: Python :: 3",
@@ -22,5 +22,6 @@ setup(name='prometheus-distributed-client',
       packages=find_packages(),
       url='https://github.com/dolead/prometheus-distributed-client/',
       install_requires=['prometheus-client>=0.0.21', 'redis>=2.10.5'],
+      tests_require=['mock'],
       test_suite='setup.test_suite',
       )

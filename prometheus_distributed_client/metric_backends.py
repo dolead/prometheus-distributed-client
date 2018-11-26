@@ -92,7 +92,8 @@ class DcmEventsPrometheusExporter:
                 else:
                     metrics_family.add_metric(label_values, value)
             if metric.metric_type in OBSERVE_METRICS:
-                for labels, value in metric.get_values_for_key('created'):
+                createds = metric.get_values_for_key('created')
+                for labels, value in sorted(createds, key=lambda x: x[1]):
                     metrics_family.add_sample(metric.name + '_created',
                             dict(labels), value)
 
