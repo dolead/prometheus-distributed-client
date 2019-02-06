@@ -83,8 +83,8 @@ class PDCTestCase(unittest.TestCase):
         ometric = OrigTypeCls('saysni', 'saysni', ['cross'],
                               registry=self.oregistry, **kwargs)
         for i in range(3):
-            getattr(metric.labels(''), method)(i)
-            getattr(ometric.labels(''), method)(i)
+            getattr(metric.labels(''), method)(i * 1.5)
+            getattr(ometric.labels(''), method)(i * 1.5)
             getattr(metric.labels('black'), method)(5 - i)
             getattr(ometric.labels('black'), method)(5 - i)
             getattr(metric.labels('knight'), method)(5 - 2 * i)
@@ -95,8 +95,8 @@ class PDCTestCase(unittest.TestCase):
             getattr(ometric.labels('black'), method)(5 - 2 * i)
             getattr(metric.labels('knight'), method)(5 - i)
             getattr(ometric.labels('knight'), method)(5 - i)
-            getattr(metric.labels(''), method)(i)
-            getattr(ometric.labels(''), method)(i)
+            getattr(metric.labels(''), method)(i / 2)
+            getattr(ometric.labels(''), method)(i / 2)
 
         self.compate_to_original()
         self.registry = CollectorRegistry()

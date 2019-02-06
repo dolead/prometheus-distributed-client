@@ -6,7 +6,6 @@ from prometheus_client.values import MutexValue
 from prometheus_client.metrics import MetricWrapperBase
 from prometheus_client.utils import floatToGoString
 
-
 _REDIS_CONN_REGISTRY = {'conn': None}
 
 def set_redis_conn(**kwargs):
@@ -33,7 +32,8 @@ class RedisValueClass(MutexValue):
         return json.dumps(dict(zip(self.__labelnames, self.__labelvalues)), sort_keys=True)
 
     def inc(self, amount):
-        return get_redis_conn().hincrby(self.__name, self._redis_key, int(amount))
+        return get_redis_conn().hincrbyfloat(
+                self.__name, self._redis_key, amount)
 
     def set(self, value):
         return get_redis_conn().hset(self.__name, self._redis_key, value)
@@ -94,8 +94,8 @@ class Summary(prometheus_client.Summary):
     def _multi_samples(self):
         for suffix in '_count', '_sum', '_created':
             for labels, value in get_redis_conn().hgetall(self._name + suffix).items():
-                yield (suffix, json.loads(labels.decode('utf8')),
-                       float(value.decode('utf8')))
+                value = float(value.decode('utf8'))
+                yield (suffix, json.loads(labels.decode('utf8')), value)
 
     _child_samples = _multi_samples
 
@@ -130,7 +130,6 @@ class Histogram(prometheus_client.Histogram):
             else:
                 self._buckets[i].inc(0)
         self._count.inc(1)
-
 
     def _multi_samples(self):
         conn = get_redis_conn()

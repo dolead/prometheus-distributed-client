@@ -9,7 +9,7 @@ def test_suite():
 
 
 setup(name='prometheus-distributed-client',
-      version='1.1.0',
+      version='1.2.1',
       description='',
       classifiers=[
           "Programming Language :: Python :: 3",
