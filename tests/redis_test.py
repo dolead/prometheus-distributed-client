@@ -1,8 +1,12 @@
 import json
 import unittest
+from mock import patch
 from redis import Redis
-from prometheus_distributed_client import set_redis_conn, Summary, Histogram, Counter
-from prometheus_client import CollectorRegistry, generate_latest
+from prometheus_distributed_client import (set_redis_conn,
+        Summary, Histogram, Counter, Gauge)
+from prometheus_client import (CollectorRegistry, generate_latest,
+        Summary as OrignalSummary, Histogram as OriginalHistogram,
+        Counter as OriginalCounter, Gauge as OriginalGauge)
 
 
 
@@ -25,94 +29,86 @@ class PDCTestCase(unittest.TestCase):
 
     def setUp(self):
         self.registry = CollectorRegistry()
+        self.oregistry = CollectorRegistry()
         self._clean()
         set_redis_conn(**self._get_redis_creds())
+        self.time_patch = patch('time.time')
+        time_mock = self.time_patch.start()
+        time_mock.return_value = 1549444326.4298077
 
     def tearDown(self):
+        self.time_patch.stop()
         self._clean()
 
-    def compate_to_block(self, block):
-        for line1, line2 in zip(block.split('\n'),
-                generate_latest(self.registry).decode('utf8').split('\n')):
-            self.assertEqual(line1, line2)
+    def compate_to_original(self):
+        def gen_latest(registry):
+            return sorted(generate_latest(registry).decode('utf8').split('\n'))
+        self.assertEqual(gen_latest(self.oregistry), gen_latest(self.registry))
 
     def test_counter_no_label(self):
         metric = Counter('shruberry', 'shruberry', registry=self.registry)
         metric.inc()
-        self.compate_to_block("""# HELP shruberry_total shruberry
-# TYPE shruberry_total counter
-shruberry_total 1.0""")
+        ometric = OriginalCounter('shruberry', 'shruberry',
+                registry=self.oregistry)
+        ometric.inc()
+        self.compate_to_original()
         self.registry = CollectorRegistry()
         metric = Counter('shruberry', 'shruberry', registry=self.registry)
-        self.compate_to_block("""# HELP shruberry_total shruberry
-# TYPE shruberry_total counter
-shruberry_total 1.0""")
+        self.compate_to_original()
 
     def test_counter_w_label(self):
+        self.maxDiff = None
         metric = Counter('fleshwound', 'fleshwound', ['cross'],
                 registry=self.registry)
+        ometric = Counter('fleshwound', 'fleshwound', ['cross'],
+                registry=self.oregistry)
         metric.labels('').inc()
         metric.labels('eki').inc()
         metric.labels('eki').inc()
         metric.labels('patang').inc()
-        self.compate_to_block(
-"""# HELP fleshwound_total fleshwound
-# TYPE fleshwound_total counter
-fleshwound_total{cross=""} 1.0
-fleshwound_total{cross="eki"} 2.0
-fleshwound_total{cross="patang"} 1.0""")
+        ometric.labels('').inc()
+        ometric.labels('eki').inc()
+        ometric.labels('eki').inc()
+        ometric.labels('patang').inc()
+        self.compate_to_original()
         self.registry = CollectorRegistry()
         metric = Counter('fleshwound', 'fleshwound', ['cross'],
                 registry=self.registry)
-        self.compate_to_block(
-"""# HELP fleshwound_total fleshwound
-# TYPE fleshwound_total counter
-fleshwound_total{cross=""} 1.0
-fleshwound_total{cross="eki"} 2.0
-fleshwound_total{cross="patang"} 1.0""")
+        self.compate_to_original()
 
-    def _test_observe(self, TypeCls, expected_output, **kwargs):
+    def _test_observe(self, TypeCls, OrigTypeCls, method='observe', **kwargs):
         self.maxDiff = None
         metric = TypeCls('saysni', 'saysni', ['cross'],
-                        registry=self.registry, **kwargs)
+                         registry=self.registry, **kwargs)
+        ometric = OrigTypeCls('saysni', 'saysni', ['cross'],
+                              registry=self.oregistry, **kwargs)
         for i in range(3):
-            metric.labels('').observe(i)
-            metric.labels('cross').observe(5 - i)
-            metric.labels('label').observe(5 - 2 * i)
+            getattr(metric.labels(''), method)(i)
+            getattr(ometric.labels(''), method)(i)
+            getattr(metric.labels('black'), method)(5 - i)
+            getattr(ometric.labels('black'), method)(5 - i)
+            getattr(metric.labels('knight'), method)(5 - 2 * i)
+            getattr(ometric.labels('knight'), method)(5 - 2 * i)
 
         for i in range(3, 5):
-            metric.labels('label').observe(5 - 2 * i)
-            metric.labels('cross').observe(5 - i)
-            metric.labels('').observe(i)
+            getattr(metric.labels('black'), method)(5 - 2 * i)
+            getattr(ometric.labels('black'), method)(5 - 2 * i)
+            getattr(metric.labels('knight'), method)(5 - i)
+            getattr(ometric.labels('knight'), method)(5 - i)
+            getattr(metric.labels(''), method)(i)
+            getattr(ometric.labels(''), method)(i)
 
-        self.compate_to_block(expected_output)
+        self.compate_to_original()
         self.registry = CollectorRegistry()
         metric = TypeCls('saysni', 'saysni', ['cross'],
-                        registry=self.registry, **kwargs)
-        self.compate_to_block(expected_output)
+                         registry=self.registry, **kwargs)
+        self.compate_to_original()
 
     def test_histogram(self):
-        expected_output = """# HELP saysni saysni
-# TYPE saysni histogram
-saysni_sum{cross=""} 10.0
-saysni_sum{cross="cross"} 15.0
-saysni_sum{cross="label"} 5.0
-saysni_bucket{cross="",le="2.5"} 3.0
-saysni_bucket{cross="cross",le="+Inf"} 3.0
-saysni_bucket{cross="label",le="+Inf"} 2.0
-saysni_bucket{cross="label",le="2.5"} 3.0
-saysni_bucket{cross="cross",le="2.5"} 2.0
-saysni_bucket{cross="",le="+Inf"} 2.0"""
-        self._test_observe(Histogram, expected_output, buckets=(2.5,))
+        self._test_observe(Histogram, OriginalHistogram, buckets=(0, 2, 4))
 
     def test_summary(self):
-        expected_output = """# HELP saysni saysni
-# TYPE saysni summary
-saysni_sum{cross=""} 10.0
-saysni_sum{cross="cross"} 15.0
-saysni_sum{cross="label"} 5.0
-saysni_count{cross=""} 5.0
-saysni_count{cross="cross"} 5.0
-saysni_count{cross="label"} 5.0
-"""
-        self._test_observe(Summary, expected_output)
+        self._test_observe(Summary, OrignalSummary)
+
+    def test_gauge(self):
+        self._test_observe(Gauge, OriginalGauge, method='set')
