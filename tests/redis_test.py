@@ -18,14 +18,7 @@ class PDCTestCase(unittest.TestCase):
             return json.load(fd)
 
     def _clean(self):
-        redis = Redis(**self._get_redis_creds())
-        for metric in 'shruberry', 'saysni', 'fleshwound':
-            redis.delete(metric)
-            redis.delete(metric + '_sum')
-            redis.delete(metric + '_total')
-            redis.delete(metric + '_count')
-            redis.delete(metric + '_created')
-            redis.delete(metric + '_bucket')
+        Redis(**self._get_redis_creds()).flushdb()
 
     def setUp(self):
         self.registry = CollectorRegistry()
