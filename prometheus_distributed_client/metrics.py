@@ -1,10 +1,12 @@
 import json
 import time
+from typing import Optional
 
 import prometheus_client
+from prometheus_client.samples import Sample
 from prometheus_client.utils import floatToGoString
 from prometheus_client.values import MutexValue
-from prometheus_client.samples import Sample
+
 from .config import get_expire, get_redis_conn, get_redis_key
 
 
@@ -39,27 +41,32 @@ class RedisValueClass(MutexValue):
         )
 
     def inc(self, amount):
-        return get_redis_conn().hincrbyfloat(
-            get_redis_key(self.__name), self._redis_subkey, amount
-        )
+        conn = get_redis_conn()
+        redis_key = get_redis_key(self.__name)
+        conn.hincrbyfloat(redis_key, self._redis_subkey, amount)
+        conn.expire(redis_key, get_expire())
 
     def set(self, value, timestamp=None):
-        return get_redis_conn().hset(
-            get_redis_key(self.__name), self._redis_subkey, value
-        )
+        conn = get_redis_conn()
+        redis_key = get_redis_key(self.__name)
+        conn.hset(redis_key, self._redis_subkey, value)
+        conn.expire(redis_key, get_expire())
 
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
 
     def setnx(self, value):
-        return get_redis_conn().hsetnx(
-            get_redis_key(self.__name), self._redis_subkey, value
-        )
+        conn = get_redis_conn()
+        redis_key = get_redis_key(self.__name)
+        conn.hsetnx(redis_key, self._redis_subkey, value)
+        conn.expire(redis_key, get_expire())
 
-    def get(self):
-        return get_redis_conn().hget(
-            get_redis_key(self.__name), self._redis_subkey
-        )
+    def get(self) -> Optional[float]:
+        redis_key = get_redis_key(self.__name)
+        bvalue = get_redis_conn().hget(redis_key, self._redis_subkey)
+        if not bvalue:
+            return bvalue
+        return float(bvalue.decode('utf8'))
 
 
 class Counter(prometheus_client.Counter):

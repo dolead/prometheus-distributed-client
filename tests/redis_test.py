@@ -1,22 +1,17 @@
 import json
+import time
 import unittest
-from mock import patch
+from unittest.mock import patch
+
+from prometheus_client import CollectorRegistry
+from prometheus_client import Counter as OriginalCounter
+from prometheus_client import Gauge as OriginalGauge
+from prometheus_client import Histogram as OriginalHistogram
+from prometheus_client import Summary as OrignalSummary
+from prometheus_client import generate_latest
+from prometheus_distributed_client import (Counter, Gauge, Histogram, Summary,
+                                           setup)
 from redis import Redis
-from prometheus_distributed_client import (
-    setup,
-    Summary,
-    Histogram,
-    Counter,
-    Gauge,
-)
-from prometheus_client import (
-    CollectorRegistry,
-    generate_latest,
-    Summary as OrignalSummary,
-    Histogram as OriginalHistogram,
-    Counter as OriginalCounter,
-    Gauge as OriginalGauge,
-)
 
 
 class PDCTestCase(unittest.TestCase):
@@ -61,7 +56,6 @@ class PDCTestCase(unittest.TestCase):
         self.compate_to_original()
 
     def test_counter_w_label(self):
-        self.maxDiff = None
         metric = Counter(
             "fleshwound", "fleshwound", ["cross"], registry=self.registry
         )
@@ -84,7 +78,6 @@ class PDCTestCase(unittest.TestCase):
         self.compate_to_original()
 
     def _test_observe(self, TypeCls, OrigTypeCls, method="observe", **kwargs):
-        self.maxDiff = None
         metric = TypeCls(
             "saysni", "saysni", ["cross"], registry=self.registry, **kwargs
         )
@@ -122,3 +115,30 @@ class PDCTestCase(unittest.TestCase):
 
     def test_gauge(self):
         self._test_observe(Gauge, OriginalGauge, method="set")
+
+    def test_expire(self):
+        setup(Redis(**self._get_redis_creds()), expire=1)
+        metric = Counter("shruberry", "shruberry", registry=self.registry)
+        metric.inc()
+        assert 1 == metric._value.get()
+        time.sleep(1)
+        assert metric._value.get() is None
+        assert metric._created.get() is None
+
+    def test_prefix(self):
+        setup(Redis(**self._get_redis_creds()), prefix="patang")
+        ametric = Counter("shruberry", "shruberry", registry=self.registry)
+        ametric.inc()
+        assert 1 == ametric._value.get()
+        assert ametric._created.get() is not None
+
+        setup(Redis(**self._get_redis_creds()), prefix="eki")
+        bmetric = Counter("shruberry", "shruberry", registry=self.oregistry)
+        bmetric.inc(10)
+
+        assert 10 == bmetric._value.get()
+        assert bmetric._created.get() is not None
+
+        setup(Redis(**self._get_redis_creds()), prefix="patang")
+        assert 1 == ametric._value.get()
+        assert ametric._created.get() is not None
