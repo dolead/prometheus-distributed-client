@@ -7,10 +7,10 @@ from prometheus_client.samples import Sample
 from prometheus_client.utils import floatToGoString
 from prometheus_client.values import MutexValue
 
-from .config import get_expire, get_redis_conn, get_redis_key
+from .config import get_redis_expire, get_redis_conn, get_redis_key
 
 
-class RedisValueClass(MutexValue):
+class ValueClass(MutexValue):
     def __init__(
         self,
         typ,
@@ -44,13 +44,13 @@ class RedisValueClass(MutexValue):
         conn = get_redis_conn()
         redis_key = get_redis_key(self.__name)
         conn.hincrbyfloat(redis_key, self._redis_subkey, amount)
-        conn.expire(redis_key, get_expire())
+        conn.expire(redis_key, get_redis_expire())
 
     def set(self, value, timestamp=None):
         conn = get_redis_conn()
         redis_key = get_redis_key(self.__name)
         conn.hset(redis_key, self._redis_subkey, value)
-        conn.expire(redis_key, get_expire())
+        conn.expire(redis_key, get_redis_expire())
 
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
@@ -59,7 +59,7 @@ class RedisValueClass(MutexValue):
         conn = get_redis_conn()
         redis_key = get_redis_key(self.__name)
         conn.hsetnx(redis_key, self._redis_subkey, value)
-        conn.expire(redis_key, get_expire())
+        conn.expire(redis_key, get_redis_expire())
 
     def get(self) -> Optional[float]:
         redis_key = get_redis_key(self.__name)
@@ -71,7 +71,7 @@ class RedisValueClass(MutexValue):
 
 class Counter(prometheus_client.Counter):
     def _metric_init(self):
-        self._value = RedisValueClass(
+        self._value = ValueClass(
             self._type,
             self._name,
             self._name + "_total",
@@ -79,7 +79,7 @@ class Counter(prometheus_client.Counter):
             self._labelvalues,
             self._documentation,
         )
-        self._created = RedisValueClass(
+        self._created = ValueClass(
             "gauge",
             self._name,
             self._name + "_created",
@@ -111,7 +111,7 @@ class Counter(prometheus_client.Counter):
 
 class Gauge(prometheus_client.Gauge):
     def _metric_init(self):
-        self._value = RedisValueClass(
+        self._value = ValueClass(
             self._type,
             self._name,
             self._name,
@@ -136,7 +136,7 @@ class Gauge(prometheus_client.Gauge):
 
 class Summary(prometheus_client.Summary):
     def _metric_init(self):
-        self._count = RedisValueClass(
+        self._count = ValueClass(
             self._type,
             self._name,
             self._name + "_count",
@@ -144,7 +144,7 @@ class Summary(prometheus_client.Summary):
             self._labelvalues,
             self._documentation,
         )
-        self._sum = RedisValueClass(
+        self._sum = ValueClass(
             self._type,
             self._name,
             self._name + "_sum",
@@ -152,7 +152,7 @@ class Summary(prometheus_client.Summary):
             self._labelvalues,
             self._documentation,
         )
-        self._created = RedisValueClass(
+        self._created = ValueClass(
             "gauge",
             self._name,
             self._name + "_created",
@@ -178,7 +178,7 @@ class Summary(prometheus_client.Summary):
 class Histogram(prometheus_client.Histogram):
     def _metric_init(self):
         self._buckets = []
-        self._created = RedisValueClass(
+        self._created = ValueClass(
             "gauge",
             self._name,
             self._name + "_created",
@@ -188,7 +188,7 @@ class Histogram(prometheus_client.Histogram):
         )
         self._created.setnx(time.time())
         bucket_labelnames = self._labelnames + ("le",)
-        self._count = RedisValueClass(
+        self._count = ValueClass(
             self._type,
             self._name,
             self._name + "_count",
@@ -196,7 +196,7 @@ class Histogram(prometheus_client.Histogram):
             self._labelvalues,
             self._documentation,
         )
-        self._sum = RedisValueClass(
+        self._sum = ValueClass(
             self._type,
             self._name,
             self._name + "_sum",
@@ -206,7 +206,7 @@ class Histogram(prometheus_client.Histogram):
         )
         for b in self._upper_bounds:
             self._buckets.append(
-                RedisValueClass(
+                ValueClass(
                     self._type,
                     self._name,
                     self._name + "_bucket",
