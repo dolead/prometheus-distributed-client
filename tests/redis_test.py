@@ -3,8 +3,14 @@ import time
 import unittest
 from unittest.mock import patch
 
-from prometheus_client import (CollectorRegistry, Counter, Gauge, Histogram,
-                               Summary, generate_latest)
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    Summary,
+    generate_latest,
+)
 from prometheus_distributed_client import setup
 from prometheus_distributed_client import redis
 from redis import Redis
@@ -40,15 +46,17 @@ class PDCTestCase(unittest.TestCase):
         self.assertEqual(gen_latest(self.oregistry), gen_latest(self.registry))
 
     def test_counter_no_label(self):
-        metric = redis.Counter("shruberry", "shruberry", registry=self.registry)
-        metric.inc()
-        ometric = Counter(
-            "shruberry", "shruberry", registry=self.oregistry
+        metric = redis.Counter(
+            "shruberry", "shruberry", registry=self.registry
         )
+        metric.inc()
+        ometric = Counter("shruberry", "shruberry", registry=self.oregistry)
         ometric.inc()
         self.compate_to_original()
         self.registry = CollectorRegistry()
-        metric = redis.Counter("shruberry", "shruberry", registry=self.registry)
+        metric = redis.Counter(
+            "shruberry", "shruberry", registry=self.registry
+        )
         self.compate_to_original()
 
     def test_counter_w_label(self):
@@ -112,7 +120,9 @@ class PDCTestCase(unittest.TestCase):
 
     def test_expire(self):
         setup(Redis(**self._get_redis_creds()), redis_expire=1)
-        metric = redis.Counter("shruberry", "shruberry", registry=self.registry)
+        metric = redis.Counter(
+            "shruberry", "shruberry", registry=self.registry
+        )
         metric.inc()
         assert 1 == metric._value.get()
         time.sleep(2)
@@ -121,13 +131,17 @@ class PDCTestCase(unittest.TestCase):
 
     def test_prefix(self):
         setup(Redis(**self._get_redis_creds()), redis_prefix="patang")
-        ametric = redis.Counter("shruberry", "shruberry", registry=self.registry)
+        ametric = redis.Counter(
+            "shruberry", "shruberry", registry=self.registry
+        )
         ametric.inc()
         assert 1 == ametric._value.get()
         assert ametric._created.get() is not None
 
         setup(Redis(**self._get_redis_creds()), redis_prefix="eki")
-        bmetric = redis.Counter("shruberry", "shruberry", registry=self.oregistry)
+        bmetric = redis.Counter(
+            "shruberry", "shruberry", registry=self.oregistry
+        )
         bmetric.inc(10)
 
         assert 10 == bmetric._value.get()
@@ -136,3 +150,17 @@ class PDCTestCase(unittest.TestCase):
         setup(Redis(**self._get_redis_creds()), redis_prefix="patang")
         assert 1 == ametric._value.get()
         assert ametric._created.get() is not None
+
+    def test_counter_expired_created(self):
+        "testing that _created gets refresh on inc"
+        setup(Redis(**self._get_redis_creds()), redis_expire=2)
+        metric = redis.Counter(
+            "shruberry", "shruberry", registry=self.registry
+        )
+        metric.inc()
+        assert 1 == metric._value.get()
+        time.sleep(1)
+        metric.inc(1)
+        time.sleep(1)
+        assert metric._value.get() is not None
+        assert metric._created.get() is not None

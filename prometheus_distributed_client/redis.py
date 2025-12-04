@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Iterable, Optional
+from typing import Dict, Iterable, Optional
 
 import prometheus_client
 from prometheus_client.samples import Sample
@@ -52,6 +52,9 @@ class ValueClass(MutexValue):
         conn.hset(redis_key, self._redis_subkey, value)
         conn.expire(redis_key, get_redis_expire())
 
+    def refresh_expire(self):
+        get_redis_conn().expire(get_redis_key(self.__name), get_redis_expire())
+
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
 
@@ -66,7 +69,7 @@ class ValueClass(MutexValue):
         bvalue = get_redis_conn().hget(redis_key, self._redis_subkey)
         if not bvalue:
             return bvalue
-        return float(bvalue.decode('utf8'))
+        return float(bvalue.decode("utf8"))
 
 
 class Counter(prometheus_client.Counter):
@@ -89,22 +92,28 @@ class Counter(prometheus_client.Counter):
         )
         self._created.setnx(time.time())
 
+    def inc(
+        self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
+    ) -> None:
+        self._created.refresh_expire()
+        return super().inc(amount, exemplar)
+
     def reset(self) -> None:
         self._value.set(0)
         self._created.set(time.time())
 
     def _samples(self) -> Iterable[Sample]:
+        conn = get_redis_conn()
+        expire = get_redis_expire()
         for suffix in "_total", "_created":
-            for labels, value in (
-                get_redis_conn()
-                .hgetall(get_redis_key(self._name) + suffix)
-                .items()
-            ):
+            key = get_redis_key(self._name) + suffix
+            for labels, value in conn.hgetall(key).items():
                 yield Sample(
                     suffix,
                     json.loads(labels.decode("utf8")),
                     float(value.decode("utf8")),
                 )
+            conn.expire(key, expire)
 
 
 class Gauge(prometheus_client.Gauge):
@@ -120,14 +129,16 @@ class Gauge(prometheus_client.Gauge):
         )
 
     def _samples(self) -> Iterable[Sample]:
-        for labels, value in (
-            get_redis_conn().hgetall(get_redis_key(self._name)).items()
-        ):
+        conn = get_redis_conn()
+        expire = get_redis_expire()
+        key = get_redis_key(self._name)
+        for labels, value in conn.hgetall(key).items():
             yield Sample(
                 "",
                 json.loads(labels.decode("utf8")),
                 float(value.decode("utf8")),
             )
+            conn.expire(key, expire)
 
 
 class Summary(prometheus_client.Summary):
@@ -159,14 +170,14 @@ class Summary(prometheus_client.Summary):
         self._created.setnx(time.time())
 
     def _samples(self) -> Iterable[Sample]:
+        conn = get_redis_conn()
+        expire = get_redis_expire()
         for suffix in "_count", "_sum", "_created":
-            for labels, value in (
-                get_redis_conn()
-                .hgetall(get_redis_key(self._name) + suffix)
-                .items()
-            ):
+            key = get_redis_key(self._name) + suffix
+            for labels, value in conn.hgetall(key).items():
                 value = float(value.decode("utf8"))
                 yield Sample(suffix, json.loads(labels.decode("utf8")), value)
+            conn.expire(key, expire)
 
 
 class Histogram(prometheus_client.Histogram):
@@ -210,7 +221,9 @@ class Histogram(prometheus_client.Histogram):
                 )
             )
 
-    def observe(self, amount: float) -> None:
+    def observe(
+        self, amount: float, exemplar: Optional[Dict[str, str]] = None
+    ) -> None:
         """Observe the given amount."""
         self._sum.inc(amount)
         for i, bound in enumerate(self._upper_bounds):
@@ -219,13 +232,15 @@ class Histogram(prometheus_client.Histogram):
             else:
                 self._buckets[i].inc(0)
         self._count.inc(1)
+        self._created.refresh_expire()
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
+        expire = get_redis_expire()
         for suffix in "_sum", "_created", "_bucket", "_count":
-            for labels, value in conn.hgetall(
-                get_redis_key(self._name) + suffix
-            ).items():
+            key = get_redis_key(self._name) + suffix
+            for labels, value in conn.hgetall(key).items():
                 labels = json.loads(labels.decode("utf8"))
                 value = float(value.decode("utf8"))
                 yield Sample(suffix, labels, value)
+            conn.expire(key, expire)
