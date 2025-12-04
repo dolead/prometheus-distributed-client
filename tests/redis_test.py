@@ -52,6 +52,7 @@ class PDCTestCase(unittest.TestCase):
         self.compate_to_original()
 
     def test_counter_w_label(self):
+        self.maxDiff = None
         metric = redis.Counter(
             "fleshwound", "fleshwound", ["cross"], registry=self.registry
         )

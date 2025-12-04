@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 import prometheus_client
 from prometheus_client.samples import Sample
@@ -93,7 +93,7 @@ class Counter(prometheus_client.Counter):
         self._value.set(0)
         self._created.set(time.time())
 
-    def _multi_samples(self):
+    def _samples(self) -> Iterable[Sample]:
         for suffix in "_total", "_created":
             for labels, value in (
                 get_redis_conn()
@@ -105,8 +105,6 @@ class Counter(prometheus_client.Counter):
                     json.loads(labels.decode("utf8")),
                     float(value.decode("utf8")),
                 )
-
-    _child_samples = _multi_samples
 
 
 class Gauge(prometheus_client.Gauge):
@@ -121,7 +119,7 @@ class Gauge(prometheus_client.Gauge):
             multiprocess_mode=self._multiprocess_mode,
         )
 
-    def _multi_samples(self):
+    def _samples(self) -> Iterable[Sample]:
         for labels, value in (
             get_redis_conn().hgetall(get_redis_key(self._name)).items()
         ):
@@ -130,8 +128,6 @@ class Gauge(prometheus_client.Gauge):
                 json.loads(labels.decode("utf8")),
                 float(value.decode("utf8")),
             )
-
-    _child_samples = _multi_samples
 
 
 class Summary(prometheus_client.Summary):
@@ -162,7 +158,7 @@ class Summary(prometheus_client.Summary):
         )
         self._created.setnx(time.time())
 
-    def _multi_samples(self):
+    def _samples(self) -> Iterable[Sample]:
         for suffix in "_count", "_sum", "_created":
             for labels, value in (
                 get_redis_conn()
@@ -171,8 +167,6 @@ class Summary(prometheus_client.Summary):
             ):
                 value = float(value.decode("utf8"))
                 yield Sample(suffix, json.loads(labels.decode("utf8")), value)
-
-    _child_samples = _multi_samples
 
 
 class Histogram(prometheus_client.Histogram):
@@ -226,7 +220,7 @@ class Histogram(prometheus_client.Histogram):
                 self._buckets[i].inc(0)
         self._count.inc(1)
 
-    def _multi_samples(self):
+    def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         for suffix in "_sum", "_created", "_bucket", "_count":
             for labels, value in conn.hgetall(
