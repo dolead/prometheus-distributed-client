@@ -7,7 +7,7 @@ from prometheus_client.samples import Sample
 from prometheus_client.utils import floatToGoString
 from prometheus_client.values import MutexValue
 
-from .config import get_redis_expire, get_redis_conn, get_redis_key
+from .config import get_sqlite_conn, get_sqlite_key
 
 
 class ValueClass(MutexValue):
@@ -33,42 +33,90 @@ class ValueClass(MutexValue):
         self.__labelvalues = labelvalues
 
     @property
-    def _redis_key(self):
-        return get_redis_key(self.__metric_name)
+    def _sqlite_key(self):
+        return get_sqlite_key(self.__metric_name)
 
     @property
-    def _redis_subkey(self):
+    def _sqlite_subkey(self):
         labels_json = json.dumps(
             dict(zip(self.__labelnames, self.__labelvalues)), sort_keys=True
         )
         return f"{self.__suffix}:{labels_json}"
 
+    def _execute(self, query, params):
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        conn.commit()
+        return cursor
+
     def inc(self, amount):
-        conn = get_redis_conn()
-        conn.hincrbyfloat(self._redis_key, self._redis_subkey, amount)
-        conn.expire(self._redis_key, get_redis_expire())
+        metric_key = self._sqlite_key
+        subkey = self._sqlite_subkey
+
+        # SQLite doesn't have atomic float increment, so we need to
+        # do it in a transaction
+        self._execute(
+            """
+            INSERT INTO metrics (metric_key, subkey, value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(metric_key, subkey) DO UPDATE SET
+                value = value + ?
+            """,
+            (metric_key, subkey, amount, amount),
+        )
 
     def set(self, value, timestamp=None):
-        conn = get_redis_conn()
-        conn.hset(self._redis_key, self._redis_subkey, value)
-        conn.expire(self._redis_key, get_redis_expire())
+        metric_key = self._sqlite_key
+        subkey = self._sqlite_subkey
+
+        self._execute(
+            """
+            INSERT INTO metrics (metric_key, subkey, value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(metric_key, subkey) DO UPDATE SET
+                value = ?
+            """,
+            (metric_key, subkey, value, value),
+        )
 
     def refresh_expire(self):
-        get_redis_conn().expire(self._redis_key, get_redis_expire())
+        # No-op for SQLite - no TTL needed
+        pass
 
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
 
     def setnx(self, value):
-        conn = get_redis_conn()
-        conn.hsetnx(self._redis_key, self._redis_subkey, value)
-        conn.expire(self._redis_key, get_redis_expire())
+        metric_key = self._sqlite_key
+        subkey = self._sqlite_subkey
+
+        self._execute(
+            """
+            INSERT INTO metrics (metric_key, subkey, value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(metric_key, subkey) DO NOTHING
+            """,
+            (metric_key, subkey, value),
+        )
 
     def get(self) -> Optional[float]:
-        bvalue = get_redis_conn().hget(self._redis_key, self._redis_subkey)
-        if not bvalue:
-            return bvalue
-        return float(bvalue.decode("utf8"))
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        metric_key = self._sqlite_key
+        subkey = self._sqlite_subkey
+
+        cursor.execute(
+            """
+            SELECT value FROM metrics
+            WHERE metric_key = ? AND subkey = ?
+            """,
+            (metric_key, subkey),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return float(row[0])
 
 
 class Counter(prometheus_client.Counter):
@@ -103,17 +151,26 @@ class Counter(prometheus_client.Counter):
         self._created.set(time.time())
 
     def _samples(self) -> Iterable[Sample]:
-        conn = get_redis_conn()
-        key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
-            field_str = field.decode("utf8")
-            suffix, labels_json = field_str.split(":", 1)
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        metric_key = get_sqlite_key(self._name)
+
+        cursor.execute(
+            """
+            SELECT subkey, value FROM metrics
+            WHERE metric_key = ?
+            """,
+            (metric_key,),
+        )
+
+        for row in cursor.fetchall():
+            subkey, value = row
+            suffix, labels_json = subkey.split(":", 1)
             yield Sample(
                 suffix,
                 json.loads(labels_json),
-                float(value.decode("utf8")),
+                float(value),
             )
-        conn.expire(key, get_redis_expire())
 
 
 class Gauge(prometheus_client.Gauge):
@@ -128,17 +185,26 @@ class Gauge(prometheus_client.Gauge):
         )
 
     def _samples(self) -> Iterable[Sample]:
-        conn = get_redis_conn()
-        key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
-            field_str = field.decode("utf8")
-            suffix, labels_json = field_str.split(":", 1)
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        metric_key = get_sqlite_key(self._name)
+
+        cursor.execute(
+            """
+            SELECT subkey, value FROM metrics
+            WHERE metric_key = ?
+            """,
+            (metric_key,),
+        )
+
+        for row in cursor.fetchall():
+            subkey, value = row
+            suffix, labels_json = subkey.split(":", 1)
             yield Sample(
                 suffix,
                 json.loads(labels_json),
-                float(value.decode("utf8")),
+                float(value),
             )
-        conn.expire(key, get_redis_expire())
 
 
 class Summary(prometheus_client.Summary):
@@ -174,17 +240,26 @@ class Summary(prometheus_client.Summary):
         return super().observe(amount)
 
     def _samples(self) -> Iterable[Sample]:
-        conn = get_redis_conn()
-        key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
-            field_str = field.decode("utf8")
-            suffix, labels_json = field_str.split(":", 1)
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        metric_key = get_sqlite_key(self._name)
+
+        cursor.execute(
+            """
+            SELECT subkey, value FROM metrics
+            WHERE metric_key = ?
+            """,
+            (metric_key,),
+        )
+
+        for row in cursor.fetchall():
+            subkey, value = row
+            suffix, labels_json = subkey.split(":", 1)
             yield Sample(
                 suffix,
                 json.loads(labels_json),
-                float(value.decode("utf8")),
+                float(value),
             )
-        conn.expire(key, get_redis_expire())
 
 
 class Histogram(prometheus_client.Histogram):
@@ -242,14 +317,23 @@ class Histogram(prometheus_client.Histogram):
         self._created.refresh_expire()
 
     def _samples(self) -> Iterable[Sample]:
-        conn = get_redis_conn()
-        key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
-            field_str = field.decode("utf8")
-            suffix, labels_json = field_str.split(":", 1)
+        conn = get_sqlite_conn()
+        cursor = conn.cursor()
+        metric_key = get_sqlite_key(self._name)
+
+        cursor.execute(
+            """
+            SELECT subkey, value FROM metrics
+            WHERE metric_key = ?
+            """,
+            (metric_key,),
+        )
+
+        for row in cursor.fetchall():
+            subkey, value = row
+            suffix, labels_json = subkey.split(":", 1)
             yield Sample(
                 suffix,
                 json.loads(labels_json),
-                float(value.decode("utf8")),
+                float(value),
             )
-        conn.expire(key, get_redis_expire())

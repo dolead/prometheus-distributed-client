@@ -1,3 +1,3 @@
-from .config import setup
+from .config import setup, setup_sqlite
 
-__all__ = ["setup"]
+__all__ = ["setup", "setup_sqlite"]

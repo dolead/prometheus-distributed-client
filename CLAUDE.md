@@ -4,21 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`prometheus-distributed-client` is a Redis-backed Prometheus metrics client for short-lived processes. It extends the official `prometheus_client` by replacing in-memory storage with Redis, enabling metrics to persist across process boundaries and be served by separate HTTP endpoints.
+`prometheus-distributed-client` is a persistent-storage Prometheus metrics client for short-lived and multiprocess applications. It extends the official `prometheus_client` by replacing in-memory storage with persistent backends (Redis or SQLite), enabling metrics to persist across process boundaries and be served by separate HTTP endpoints.
+
+### Use Cases
+
+This library is ideal for:
+
+1. **Short-lived processes** that cannot expose metrics on a dedicated port (e.g., cron jobs, batch scripts, serverless functions)
+2. **Multiprocess applications** where multiple worker processes need to share and aggregate metrics efficiently
+3. **Distributed systems** requiring centralized metric collection from multiple instances
 
 ### Key Architecture
 
-The library provides Redis-backed implementations of standard Prometheus metric types (Counter, Gauge, Summary, Histogram) by:
+The library provides two backend implementations (Redis and SQLite) of standard Prometheus metric types (Counter, Gauge, Summary, Histogram) by:
 1. Subclassing the official `prometheus_client` metric classes
 2. Overriding `_metric_init()` to use custom `ValueClass` instead of `MutexValue`
-3. Overriding `_samples()` to read from Redis instead of memory
+3. Overriding `_samples()` to read from the backend storage instead of memory
 
-All metric operations (inc, set, observe) write directly to Redis using hash structures where:
-- Hash key: `{redis_prefix}_{metric_name}_{suffix}` (e.g., `prometheus_counter_total`)
-- Hash field: JSON-serialized label dict (e.g., `{"label1":"value1"}`)
-- Hash value: numeric metric value
+**Storage Format** (prevents desync between metric components):
+- **Single key per metric**: All suffixes stored together for atomic expiration
+- **Redis**: Hash with fields like `_total:{"label":"value"}`, `_created:{"label":"value"}`
+- **SQLite**: Table rows with columns (metric_key, subkey, value, expire_at) where subkey = `suffix:labels_json`
 
-Each Redis operation automatically refreshes TTL using the configured `redis_expire` value.
+This ensures all metric components (_total, _created, _sum, etc.) expire together, preventing the desync bug where _created could expire independently.
 
 ## Development Commands
 
@@ -30,11 +38,15 @@ make test
 # Run tests directly with pytest
 PYTHONPATH=$(pwd) poetry run pytest
 
+# Run tests for specific backend
+PYTHONPATH=$(pwd) poetry run pytest tests/redis_test.py -v
+PYTHONPATH=$(pwd) poetry run pytest tests/sqlite_test.py -v
+
 # Run a single test
 PYTHONPATH=$(pwd) poetry run pytest tests/redis_test.py::PDCTestCase::test_counter_no_label
 ```
 
-**Important**: Tests require a `.redis.json` file in the project root with Redis connection credentials:
+**Important for Redis tests**: Tests require a `.redis.json` file in the project root with Redis connection credentials:
 ```json
 {
   "host": "localhost",
@@ -43,7 +55,8 @@ PYTHONPATH=$(pwd) poetry run pytest tests/redis_test.py::PDCTestCase::test_count
 }
 ```
 
-Tests flush the Redis database in `setUp()` and `tearDown()`, so use a dedicated test database.
+Redis tests flush the database in `setUp()` and `tearDown()`, so use a dedicated test database.
+SQLite tests use in-memory databases (`:memory:`) and don't require external setup.
 
 ### Linting
 ```bash
@@ -68,36 +81,51 @@ make publish  # Builds, publishes to PyPI, creates git tag, pushes tags
 
 ```
 prometheus_distributed_client/
-├── __init__.py   # Exports setup() function
-├── config.py     # Global configuration (Redis connection, prefix, TTL)
-└── redis.py      # Redis-backed metric implementations (Counter, Gauge, Summary, Histogram)
+├── __init__.py   # Exports setup(), setup_sqlite()
+├── config.py     # Configuration for both backends
+├── redis.py      # Redis backend implementations
+└── sqlite.py     # SQLite backend implementations
+
+tests/
+├── redis_test.py   # Redis backend tests
+└── sqlite_test.py  # SQLite backend tests
 ```
 
 ### Critical Implementation Details
 
-**ValueClass** (redis.py:13-73): Core abstraction that implements metric value storage in Redis. Key methods:
-- `inc()`: Uses `hincrbyfloat` for atomic increments
-- `set()`: Uses `hset` for absolute values
+**ValueClass**: Core abstraction that implements metric value storage. Key methods:
+- `inc()`: Atomic increments (Redis: `hincrbyfloat`, SQLite: `INSERT ... ON CONFLICT DO UPDATE`)
+- `set()`: Absolute value updates with TTL refresh
 - `setnx()`: Sets value only if not exists (used for `_created` timestamps)
-- `get()`: Retrieves and decodes value from Redis
-- `refresh_expire()`: Extends TTL without modifying value (critical for `_created` fields)
+- `get()`: Retrieves value, filtering by expiration time
+- `refresh_expire()`: Extends TTL for entire metric
 
-**Metric Suffixes**: Each metric type uses Redis keys with specific suffixes:
+**Metric Suffixes**: Each metric type stores multiple components:
 - Counter: `_total`, `_created`
-- Gauge: no suffix
+- Gauge: empty suffix `""`
 - Summary: `_count`, `_sum`, `_created`
 - Histogram: `_bucket`, `_count`, `_sum`, `_created`
 
-**TTL Management**: The `_created` suffix requires special handling. When a metric is incremented/observed, `refresh_expire()` must be called on `_created` to keep it in sync with the other suffixes (see Counter.inc():98, Histogram.observe():235).
+**Storage Format** (critical for preventing desync):
+- All suffixes stored in single key/table with format: `suffix:labels_json`
+- Redis: `prometheus_counter` → fields `_total:{}`, `_created:{}`
+- SQLite: `prometheus_counter` → rows with subkey `_total:{}`, `_created:{}`
+- When TTL expires, ALL components expire atomically
 
-**_samples() Implementation**: All metric classes override `_samples()` to read all label combinations from Redis hashes, refresh their TTL, and yield Sample objects. This is called when generating the Prometheus exposition format.
+**_samples() Implementation**: All metric classes override `_samples()` to:
+1. Read all data from single key/table
+2. Parse `suffix:labels_json` format
+3. Refresh TTL once for entire metric
+4. Yield Sample objects for Prometheus exposition format
 
 ## Configuration
 
-The library uses a global configuration singleton in `config.py`. Initialize once per application:
+The library uses a global configuration singleton in `config.py`. Initialize once per application.
 
+**Redis Backend:**
 ```python
 from prometheus_distributed_client import setup
+from prometheus_distributed_client.redis import Counter
 from redis import Redis
 
 setup(
@@ -105,20 +133,45 @@ setup(
     redis_prefix='prometheus',  # Default: "prometheus"
     redis_expire=3600           # Default: 3600 seconds
 )
+
+counter = Counter('my_counter', 'help', registry=REGISTRY)
 ```
 
-**redis_prefix**: Used to namespace metrics in Redis (useful for multiple applications sharing one Redis instance or isolation during testing).
+**SQLite Backend:**
+```python
+from prometheus_distributed_client import setup_sqlite
+from prometheus_distributed_client.sqlite import Counter
+import sqlite3
+
+# With file path
+setup_sqlite('metrics.db', sqlite_prefix='prometheus')
+
+# Or with connection object
+conn = sqlite3.connect(':memory:')
+setup_sqlite(conn)
+
+counter = Counter('my_counter', 'help', registry=REGISTRY)
+```
+
+**Key Differences:**
+- **Redis TTL**: Required because Redis is typically a central/shared database that could accumulate stale metrics from multiple applications
+- **SQLite No TTL**: SQLite is file-based and not shared. Metrics are automatically cleaned up when the file is deleted (e.g., container restart, process cleanup)
+- **Prefix parameter**: Used to namespace metrics (useful for multiple applications sharing one backend instance or isolation during testing)
 
 ## Testing Patterns
 
-Tests compare output of Redis-backed metrics against the official client's in-memory metrics using `compate_to_original()`:
+Both backends use identical test patterns to ensure compatibility:
+
+**Comparison Tests**: Compare backend metrics against official client using `compate_to_original()`:
 1. Perform identical operations on both metric types
 2. Generate Prometheus exposition format for both registries
 3. Sort and compare line-by-line
 
-Tests also verify persistence by creating a new registry/metric instance and confirming data is read from Redis.
+**Persistence Tests**: Verify data persists by creating new registry/metric instances and reading from storage.
 
-Time is mocked in tests (`time.time()` returns `1549444326.4298077`) to ensure deterministic `_created` timestamps.
+**Expiration Tests**: Verify TTL behavior and that all metric components expire together atomically.
+
+**Time Mocking**: Tests mock `time.time()` (returns `1549444326.4298077`) for deterministic `_created` timestamps. The `test_expire` test temporarily unmocks time to verify actual expiration behavior.
 
 ## Code Style
 
