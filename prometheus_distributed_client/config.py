@@ -1,5 +1,5 @@
 import sqlite3
-from typing import Union
+from typing import Union, Optional
 
 from redis import Redis
 
@@ -7,50 +7,80 @@ _CONFIG = {}
 
 
 def setup(
-    redis: Redis, redis_prefix: str = "prometheus", redis_expire: int = 3600
+    redis: Optional[Redis] = None,
+    sqlite: Optional[Union[sqlite3.Connection, str]] = None,
+    redis_prefix: str = "prometheus",
+    redis_expire: int = 3600,
 ):
-    _CONFIG["redis"] = redis
-    _CONFIG["redis_prefix"] = redis_prefix
-    _CONFIG["redis_expire"] = redis_expire
-
-
-def setup_sqlite(
-    sqlite: Union[sqlite3.Connection, str],
-    sqlite_prefix: str = "prometheus",
-):
-    """Setup SQLite backend.
+    """Setup metrics backend (Redis or SQLite).
 
     Args:
+        redis: Redis connection (mutually exclusive with sqlite)
         sqlite: SQLite connection or path to database file
-        sqlite_prefix: Prefix for metric keys
+            (mutually exclusive with redis)
+        redis_prefix: Prefix for metric keys (Redis only)
+        redis_expire: TTL in seconds for metrics (Redis only)
+
+    Examples:
+        # Redis backend
+        from redis import Redis
+        setup(
+            redis=Redis(host='localhost', port=6379),
+            redis_prefix='myapp',
+            redis_expire=3600
+        )
+
+        # SQLite backend (connection object)
+        import sqlite3
+        setup(sqlite=sqlite3.connect('metrics.db'))
+
+        # SQLite backend (file path)
+        setup(sqlite='metrics.db')
 
     Note:
-        Unlike Redis, SQLite does not use TTL/expiration. SQLite is
-        file-based and typically not shared between applications, so
-        metrics are cleaned up when the file is deleted (e.g., on
-        container restart).
+        - Must provide either redis or sqlite, not both
+        - Redis: Uses redis_prefix and redis_expire to prevent pollution
+          in shared database
+        - SQLite: No prefix/expire needed - file-based and self-contained
     """
-    if isinstance(sqlite, str):
-        conn = sqlite3.Connection(sqlite)
-    else:
-        conn = sqlite
+    if redis is not None and sqlite is not None:
+        raise ValueError("Cannot specify both redis and sqlite")
 
-    # Create table if it doesn't exist
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS metrics (
-            metric_key TEXT NOT NULL,
-            subkey TEXT NOT NULL,
-            value REAL NOT NULL,
-            PRIMARY KEY (metric_key, subkey)
+    if redis is not None:
+        # Setup Redis backend
+        _CONFIG["redis"] = redis
+        _CONFIG["redis_prefix"] = redis_prefix
+        _CONFIG["redis_expire"] = redis_expire
+    elif sqlite is not None:
+        # Setup SQLite backend
+        if isinstance(sqlite, str):
+            conn = sqlite3.connect(sqlite)
+        else:
+            conn = sqlite
+
+        # Create table if it doesn't exist
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS metrics (
+                metric_key TEXT NOT NULL,
+                subkey TEXT NOT NULL,
+                value REAL NOT NULL,
+                PRIMARY KEY (metric_key, subkey)
+            )
+            """
         )
-        """
-    )
-    conn.commit()
+        conn.commit()
 
-    _CONFIG["sqlite"] = conn
-    _CONFIG["sqlite_prefix"] = sqlite_prefix
+        _CONFIG["sqlite"] = conn
+    else:
+        raise ValueError("Must specify either redis or sqlite")
+
+
+# Backward compatibility alias
+def setup_sqlite(sqlite: Union[sqlite3.Connection, str]):
+    """Deprecated: Use setup() instead."""
+    setup(sqlite)
 
 
 def get_redis_conn() -> Redis:
@@ -67,7 +97,3 @@ def get_redis_key(name) -> str:
 
 def get_sqlite_conn() -> sqlite3.Connection:
     return _CONFIG["sqlite"]
-
-
-def get_sqlite_key(name) -> str:
-    return f"{_CONFIG['sqlite_prefix']}_{name}"

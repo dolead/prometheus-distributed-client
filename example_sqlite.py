@@ -4,12 +4,12 @@ import sqlite3
 from flask import Flask
 from prometheus_client import CollectorRegistry, generate_latest
 
-from prometheus_distributed_client import setup_sqlite
+from prometheus_distributed_client import setup
 from prometheus_distributed_client.sqlite import Counter, Gauge, Histogram
 
 # Setup SQLite backend
 conn = sqlite3.connect("metrics.db")
-setup_sqlite(conn, sqlite_prefix="myapp", sqlite_expire=3600)
+setup(sqlite=conn)
 
 # Create a registry
 REGISTRY = CollectorRegistry()

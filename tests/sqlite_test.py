@@ -11,7 +11,7 @@ from prometheus_client import (
     Summary,
     generate_latest,
 )
-from prometheus_distributed_client import setup_sqlite
+from prometheus_distributed_client import setup
 from prometheus_distributed_client import sqlite as sqlite_metrics
 
 
@@ -32,7 +32,7 @@ class PDCTestCase(unittest.TestCase):
         self.registry = CollectorRegistry()
         self.oregistry = CollectorRegistry()
         self.sqlite_conn = self._get_sqlite_conn()
-        setup_sqlite(self.sqlite_conn)
+        setup(sqlite=self.sqlite_conn)
         self.time_patch = patch("time.time")
         time_mock = self.time_patch.start()
         time_mock.return_value = 1549444326.4298077
@@ -122,27 +122,4 @@ class PDCTestCase(unittest.TestCase):
 
     def test_gauge(self):
         self._test_observe(sqlite_metrics.Gauge, Gauge, method="set")
-
-
-    def test_prefix(self):
-        setup_sqlite(self.sqlite_conn, sqlite_prefix="patang")
-        ametric = sqlite_metrics.Counter(
-            "shruberry", "shruberry", registry=self.registry
-        )
-        ametric.inc()
-        assert 1 == ametric._value.get()
-        assert ametric._created.get() is not None
-
-        setup_sqlite(self.sqlite_conn, sqlite_prefix="eki")
-        bmetric = sqlite_metrics.Counter(
-            "shruberry", "shruberry", registry=self.oregistry
-        )
-        bmetric.inc(10)
-
-        assert 10 == bmetric._value.get()
-        assert bmetric._created.get() is not None
-
-        setup_sqlite(self.sqlite_conn, sqlite_prefix="patang")
-        assert 1 == ametric._value.get()
-        assert ametric._created.get() is not None
 

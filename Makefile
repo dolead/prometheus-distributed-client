@@ -4,7 +4,7 @@ clean:
 	rm -rf build dist .coverage
 
 test:
-	PYTHONPATH=$(PYTHONPATH):$(shell pwd) poetry run pytest
+	PYTHONPATH=$(PYTHONPATH):$(shell pwd) poetry run python -m unittest discover -s tests -p "*_test.py"
 
 build: clean lint test
 	poetry build

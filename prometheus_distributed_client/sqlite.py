@@ -7,7 +7,7 @@ from prometheus_client.samples import Sample
 from prometheus_client.utils import floatToGoString
 from prometheus_client.values import MutexValue
 
-from .config import get_sqlite_conn, get_sqlite_key
+from .config import get_sqlite_conn
 
 
 class ValueClass(MutexValue):
@@ -34,7 +34,7 @@ class ValueClass(MutexValue):
 
     @property
     def _sqlite_key(self):
-        return get_sqlite_key(self.__metric_name)
+        return self.__metric_name
 
     @property
     def _sqlite_subkey(self):
@@ -153,14 +153,13 @@ class Counter(prometheus_client.Counter):
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        metric_key = get_sqlite_key(self._name)
 
         cursor.execute(
             """
             SELECT subkey, value FROM metrics
             WHERE metric_key = ?
             """,
-            (metric_key,),
+            (self._name,),
         )
 
         for row in cursor.fetchall():
@@ -187,14 +186,13 @@ class Gauge(prometheus_client.Gauge):
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        metric_key = get_sqlite_key(self._name)
 
         cursor.execute(
             """
             SELECT subkey, value FROM metrics
             WHERE metric_key = ?
             """,
-            (metric_key,),
+            (self._name,),
         )
 
         for row in cursor.fetchall():
@@ -242,14 +240,13 @@ class Summary(prometheus_client.Summary):
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        metric_key = get_sqlite_key(self._name)
 
         cursor.execute(
             """
             SELECT subkey, value FROM metrics
             WHERE metric_key = ?
             """,
-            (metric_key,),
+            (self._name,),
         )
 
         for row in cursor.fetchall():
@@ -319,14 +316,13 @@ class Histogram(prometheus_client.Histogram):
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()
         cursor = conn.cursor()
-        metric_key = get_sqlite_key(self._name)
 
         cursor.execute(
             """
             SELECT subkey, value FROM metrics
             WHERE metric_key = ?
             """,
-            (metric_key,),
+            (self._name,),
         )
 
         for row in cursor.fetchall():

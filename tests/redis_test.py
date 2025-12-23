@@ -30,7 +30,7 @@ class PDCTestCase(unittest.TestCase):
         self.registry = CollectorRegistry()
         self.oregistry = CollectorRegistry()
         self._clean()
-        setup(Redis(**self._get_redis_creds()))
+        setup(redis=Redis(**self._get_redis_creds()))
         self.time_patch = patch("time.time")
         time_mock = self.time_patch.start()
         time_mock.return_value = 1549444326.4298077

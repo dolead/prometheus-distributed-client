@@ -78,14 +78,11 @@ print(generate_latest(REGISTRY).decode('utf8'))
 ```python
 import sqlite3
 from prometheus_client import CollectorRegistry, generate_latest
-from prometheus_distributed_client import setup_sqlite
+from prometheus_distributed_client import setup
 from prometheus_distributed_client.sqlite import Counter, Gauge, Histogram
 
-# Setup SQLite backend (no TTL needed)
-setup_sqlite(
-    'metrics.db',  # or sqlite3.connect(':memory:') for in-memory
-    sqlite_prefix='myapp'
-)
+# Setup SQLite backend (no TTL or prefix needed)
+setup(sqlite='metrics.db')  # or setup(sqlite=sqlite3.connect(':memory:'))
 
 # Use exactly like Redis backend
 REGISTRY = CollectorRegistry()
@@ -123,15 +120,15 @@ Fields:
 
 **SQLite:**
 ```sql
-metric_key              | subkey                                    | value       | expire_at
-------------------------+-------------------------------------------+-------------+-------------
-prometheus_myapp_req... | _total:{"method":"GET","endpoint":"/api"} | 42          | 1234571490.0
-prometheus_myapp_req... | _created:{"method":"GET","endpoint":"/"...| 1234567890.0| 1234571490.0
+metric_key              | subkey                                    | value
+------------------------+-------------------------------------------+-------------
+requests                | _total:{"method":"GET","endpoint":"/api"} | 42
+requests                | _created:{"method":"GET","endpoint":"/api"}| 1234567890.0
 ```
 
 This design ensures:
 - All metric components share the same key/row
-- TTL applies to the entire metric atomically
+- TTL applies atomically to the entire metric (Redis only)
 - No desynchronization between `_total`, `_created`, etc.
 
 ## Comparison with Alternatives
@@ -164,10 +161,10 @@ For multiprocess applications (e.g., Gunicorn with multiple workers), `prometheu
 
 ```python
 # Short TTL for transient metrics
-setup(redis, redis_expire=60)  # 1 minute
+setup(redis=redis, redis_expire=60)  # 1 minute
 
 # Long TTL for important metrics
-setup(redis, redis_expire=86400)  # 24 hours
+setup(redis=redis, redis_expire=86400)  # 24 hours
 
 # Note: SQLite doesn't use TTL
 ```
@@ -176,10 +173,10 @@ setup(redis, redis_expire=86400)  # 24 hours
 
 ```python
 # Application 1
-setup(redis, redis_prefix='app1')
+setup(redis=redis, redis_prefix='app1')
 
 # Application 2
-setup(redis, redis_prefix='app2')
+setup(redis=redis, redis_prefix='app2')
 
 # Metrics are isolated by prefix
 ```

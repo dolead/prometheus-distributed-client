@@ -81,7 +81,7 @@ make publish  # Builds, publishes to PyPI, creates git tag, pushes tags
 
 ```
 prometheus_distributed_client/
-├── __init__.py   # Exports setup(), setup_sqlite()
+├── __init__.py   # Exports unified setup() function
 ├── config.py     # Configuration for both backends
 ├── redis.py      # Redis backend implementations
 └── sqlite.py     # SQLite backend implementations
@@ -139,16 +139,16 @@ counter = Counter('my_counter', 'help', registry=REGISTRY)
 
 **SQLite Backend:**
 ```python
-from prometheus_distributed_client import setup_sqlite
+from prometheus_distributed_client import setup
 from prometheus_distributed_client.sqlite import Counter
 import sqlite3
 
 # With file path
-setup_sqlite('metrics.db', sqlite_prefix='prometheus')
+setup(sqlite='metrics.db')
 
 # Or with connection object
 conn = sqlite3.connect(':memory:')
-setup_sqlite(conn)
+setup(sqlite=conn)
 
 counter = Counter('my_counter', 'help', registry=REGISTRY)
 ```
@@ -156,7 +156,7 @@ counter = Counter('my_counter', 'help', registry=REGISTRY)
 **Key Differences:**
 - **Redis TTL**: Required because Redis is typically a central/shared database that could accumulate stale metrics from multiple applications
 - **SQLite No TTL**: SQLite is file-based and not shared. Metrics are automatically cleaned up when the file is deleted (e.g., container restart, process cleanup)
-- **Prefix parameter**: Used to namespace metrics (useful for multiple applications sharing one backend instance or isolation during testing)
+- **Redis Prefix parameter**: Used to namespace metrics in Redis (useful for multiple applications sharing one Redis instance or isolation during testing). SQLite doesn't use prefixes since it's self-contained.
 
 ## Testing Patterns
 
