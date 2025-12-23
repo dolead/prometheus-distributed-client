@@ -15,58 +15,60 @@ class ValueClass(MutexValue):
         self,
         typ,
         metric_name,
-        name,
         labelnames,
         labelvalues,
         help_text,
+        suffix="",
         **kwargs,
     ):
         super().__init__(
             typ,
             metric_name,
-            name,
+            metric_name + suffix,
             labelnames,
             labelvalues,
             help_text,
             **kwargs,
         )
-        self.__name = name
+        self.__metric_name = metric_name
+        self.__suffix = suffix
         self.__labelnames = labelnames
         self.__labelvalues = labelvalues
 
     @property
+    def _redis_key(self):
+        return get_redis_key(self.__metric_name)
+
+    @property
     def _redis_subkey(self):
-        return json.dumps(
+        labels_json = json.dumps(
             dict(zip(self.__labelnames, self.__labelvalues)), sort_keys=True
         )
+        return f"{self.__suffix}:{labels_json}"
 
     def inc(self, amount):
         conn = get_redis_conn()
-        redis_key = get_redis_key(self.__name)
-        conn.hincrbyfloat(redis_key, self._redis_subkey, amount)
-        conn.expire(redis_key, get_redis_expire())
+        conn.hincrbyfloat(self._redis_key, self._redis_subkey, amount)
+        conn.expire(self._redis_key, get_redis_expire())
 
     def set(self, value, timestamp=None):
         conn = get_redis_conn()
-        redis_key = get_redis_key(self.__name)
-        conn.hset(redis_key, self._redis_subkey, value)
-        conn.expire(redis_key, get_redis_expire())
+        conn.hset(self._redis_key, self._redis_subkey, value)
+        conn.expire(self._redis_key, get_redis_expire())
 
     def refresh_expire(self):
-        get_redis_conn().expire(get_redis_key(self.__name), get_redis_expire())
+        get_redis_conn().expire(self._redis_key, get_redis_expire())
 
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
 
     def setnx(self, value):
         conn = get_redis_conn()
-        redis_key = get_redis_key(self.__name)
-        conn.hsetnx(redis_key, self._redis_subkey, value)
-        conn.expire(redis_key, get_redis_expire())
+        conn.hsetnx(self._redis_key, self._redis_subkey, value)
+        conn.expire(self._redis_key, get_redis_expire())
 
     def get(self) -> Optional[float]:
-        redis_key = get_redis_key(self.__name)
-        bvalue = get_redis_conn().hget(redis_key, self._redis_subkey)
+        bvalue = get_redis_conn().hget(self._redis_key, self._redis_subkey)
         if not bvalue:
             return bvalue
         return float(bvalue.decode("utf8"))
@@ -77,24 +79,25 @@ class Counter(prometheus_client.Counter):
         self._value = ValueClass(
             self._type,
             self._name,
-            self._name + "_total",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_total",
         )
         self._created = ValueClass(
             "gauge",
             self._name,
-            self._name + "_created",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_created",
         )
         self._created.setnx(time.time())
 
     def inc(
         self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
+        self._created.setnx(time.time())
         self._created.refresh_expire()
         return super().inc(amount, exemplar)
 
@@ -104,16 +107,16 @@ class Counter(prometheus_client.Counter):
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
-        expire = get_redis_expire()
-        for suffix in "_total", "_created":
-            key = get_redis_key(self._name) + suffix
-            for labels, value in conn.hgetall(key).items():
-                yield Sample(
-                    suffix,
-                    json.loads(labels.decode("utf8")),
-                    float(value.decode("utf8")),
-                )
-            conn.expire(key, expire)
+        key = get_redis_key(self._name)
+        for field, value in conn.hgetall(key).items():
+            field_str = field.decode("utf8")
+            suffix, labels_json = field_str.split(":", 1)
+            yield Sample(
+                suffix,
+                json.loads(labels_json),
+                float(value.decode("utf8")),
+            )
+        conn.expire(key, get_redis_expire())
 
 
 class Gauge(prometheus_client.Gauge):
@@ -121,24 +124,25 @@ class Gauge(prometheus_client.Gauge):
         self._value = ValueClass(
             self._type,
             self._name,
-            self._name,
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="",
             multiprocess_mode=self._multiprocess_mode,
         )
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
-        expire = get_redis_expire()
         key = get_redis_key(self._name)
-        for labels, value in conn.hgetall(key).items():
+        for field, value in conn.hgetall(key).items():
+            field_str = field.decode("utf8")
+            suffix, labels_json = field_str.split(":", 1)
             yield Sample(
-                "",
-                json.loads(labels.decode("utf8")),
+                suffix,
+                json.loads(labels_json),
                 float(value.decode("utf8")),
             )
-            conn.expire(key, expire)
+        conn.expire(key, get_redis_expire())
 
 
 class Summary(prometheus_client.Summary):
@@ -146,38 +150,45 @@ class Summary(prometheus_client.Summary):
         self._count = ValueClass(
             self._type,
             self._name,
-            self._name + "_count",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_count",
         )
         self._sum = ValueClass(
             self._type,
             self._name,
-            self._name + "_sum",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_sum",
         )
         self._created = ValueClass(
             "gauge",
             self._name,
-            self._name + "_created",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_created",
         )
         self._created.setnx(time.time())
 
+    def observe(self, amount: float) -> None:
+        self._created.refresh_expire()
+        return super().observe(amount)
+
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
-        expire = get_redis_expire()
-        for suffix in "_count", "_sum", "_created":
-            key = get_redis_key(self._name) + suffix
-            for labels, value in conn.hgetall(key).items():
-                value = float(value.decode("utf8"))
-                yield Sample(suffix, json.loads(labels.decode("utf8")), value)
-            conn.expire(key, expire)
+        key = get_redis_key(self._name)
+        for field, value in conn.hgetall(key).items():
+            field_str = field.decode("utf8")
+            suffix, labels_json = field_str.split(":", 1)
+            yield Sample(
+                suffix,
+                json.loads(labels_json),
+                float(value.decode("utf8")),
+            )
+        conn.expire(key, get_redis_expire())
 
 
 class Histogram(prometheus_client.Histogram):
@@ -186,38 +197,38 @@ class Histogram(prometheus_client.Histogram):
         self._created = ValueClass(
             "gauge",
             self._name,
-            self._name + "_created",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_created",
         )
         self._created.setnx(time.time())
         bucket_labelnames = self._labelnames + ("le",)
         self._count = ValueClass(
             self._type,
             self._name,
-            self._name + "_count",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_count",
         )
         self._sum = ValueClass(
             self._type,
             self._name,
-            self._name + "_sum",
             self._labelnames,
             self._labelvalues,
             self._documentation,
+            suffix="_sum",
         )
         for b in self._upper_bounds:
             self._buckets.append(
                 ValueClass(
                     self._type,
                     self._name,
-                    self._name + "_bucket",
                     bucket_labelnames,
                     self._labelvalues + (floatToGoString(b),),
                     self._documentation,
+                    suffix="_bucket",
                 )
             )
 
@@ -236,11 +247,13 @@ class Histogram(prometheus_client.Histogram):
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
-        expire = get_redis_expire()
-        for suffix in "_sum", "_created", "_bucket", "_count":
-            key = get_redis_key(self._name) + suffix
-            for labels, value in conn.hgetall(key).items():
-                labels = json.loads(labels.decode("utf8"))
-                value = float(value.decode("utf8"))
-                yield Sample(suffix, labels, value)
-            conn.expire(key, expire)
+        key = get_redis_key(self._name)
+        for field, value in conn.hgetall(key).items():
+            field_str = field.decode("utf8")
+            suffix, labels_json = field_str.split(":", 1)
+            yield Sample(
+                suffix,
+                json.loads(labels_json),
+                float(value.decode("utf8")),
+            )
+        conn.expire(key, get_redis_expire())

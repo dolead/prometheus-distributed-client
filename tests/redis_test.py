@@ -164,3 +164,35 @@ class PDCTestCase(unittest.TestCase):
         time.sleep(1)
         assert metric._value.get() is not None
         assert metric._created.get() is not None
+
+    def test_summary_expired_created(self):
+        "testing that _created gets refresh on observe"
+        setup(Redis(**self._get_redis_creds()), redis_expire=2)
+        metric = redis.Summary(
+            "request_duration", "request duration", registry=self.registry
+        )
+        metric.observe(0.5)
+        assert metric._sum.get() == 0.5
+        assert metric._count.get() == 1.0
+        time.sleep(1)
+        metric.observe(1.5)
+        time.sleep(1)
+        assert metric._sum.get() is not None
+        assert metric._count.get() is not None
+        assert metric._created.get() is not None
+
+    def test_histogram_expired_created(self):
+        "testing that _created gets refresh on observe"
+        setup(Redis(**self._get_redis_creds()), redis_expire=2)
+        metric = redis.Histogram(
+            "request_size", "request size", registry=self.registry
+        )
+        metric.observe(100)
+        assert metric._sum.get() == 100
+        assert metric._count.get() == 1.0
+        time.sleep(1)
+        metric.observe(200)
+        time.sleep(1)
+        assert metric._sum.get() is not None
+        assert metric._count.get() is not None
+        assert metric._created.get() is not None
