@@ -24,7 +24,7 @@ The library provides two backend implementations (Redis and SQLite) of standard 
 **Storage Format** (prevents desync between metric components):
 - **Single key per metric**: All suffixes stored together for atomic expiration
 - **Redis**: Hash with fields like `_total:{"label":"value"}`, `_created:{"label":"value"}`
-- **SQLite**: Table rows with columns (metric_key, subkey, value, expire_at) where subkey = `suffix:labels_json`
+- **SQLite**: Table rows with columns (metric_key, subkey, value) where subkey = `suffix:labels_json`
 
 This ensures all metric components (_total, _created, _sum, etc.) expire together, preventing the desync bug where _created could expire independently.
 
@@ -35,15 +35,15 @@ This ensures all metric components (_total, _created, _sum, etc.) expire togethe
 # Run all tests
 make test
 
-# Run tests directly with pytest
-PYTHONPATH=$(pwd) poetry run pytest
+# Run tests directly with unittest
+PYTHONPATH=$(pwd) poetry run python -m unittest discover -s tests -p "*_test.py"
 
 # Run tests for specific backend
-PYTHONPATH=$(pwd) poetry run pytest tests/redis_test.py -v
-PYTHONPATH=$(pwd) poetry run pytest tests/sqlite_test.py -v
+PYTHONPATH=$(pwd) poetry run python -m unittest tests.redis_test
+PYTHONPATH=$(pwd) poetry run python -m unittest tests.sqlite_test
 
 # Run a single test
-PYTHONPATH=$(pwd) poetry run pytest tests/redis_test.py::PDCTestCase::test_counter_no_label
+PYTHONPATH=$(pwd) poetry run python -m unittest tests.redis_test.PDCTestCase.test_counter_no_label
 ```
 
 **Important for Redis tests**: Tests require a `.redis.json` file in the project root with Redis connection credentials:
@@ -67,9 +67,11 @@ make lint
 poetry check                                              # Validate pyproject.toml
 poetry run pycodestyle --ignore=E126,E127,E128,W503 prometheus_distributed_client/
 poetry run black --check --verbose prometheus_distributed_client/
+poetry run flake8 prometheus_distributed_client/
+poetry run pylint prometheus_distributed_client/ -d I0011,R0901,R0902,R0801,C0111,C0103,C0411,C0415,R0903,R0913,R0914,R0915,R1710,W0613,W0703
 ```
 
-Note: mypy and pylint are commented out in the Makefile.
+Note: mypy is commented out in the Makefile.
 
 ### Building & Publishing
 ```bash
@@ -95,10 +97,10 @@ tests/
 
 **ValueClass**: Core abstraction that implements metric value storage. Key methods:
 - `inc()`: Atomic increments (Redis: `hincrbyfloat`, SQLite: `INSERT ... ON CONFLICT DO UPDATE`)
-- `set()`: Absolute value updates with TTL refresh
+- `set()`: Absolute value updates with TTL refresh (Redis only)
 - `setnx()`: Sets value only if not exists (used for `_created` timestamps)
-- `get()`: Retrieves value, filtering by expiration time
-- `refresh_expire()`: Extends TTL for entire metric
+- `get()`: Retrieves value from storage
+- `refresh_expire()`: Extends TTL for entire metric (Redis only, no-op for SQLite)
 
 **Metric Suffixes**: Each metric type stores multiple components:
 - Counter: `_total`, `_created`
@@ -115,7 +117,7 @@ tests/
 **_samples() Implementation**: All metric classes override `_samples()` to:
 1. Read all data from single key/table
 2. Parse `suffix:labels_json` format
-3. Refresh TTL once for entire metric
+3. Refresh TTL once for entire metric (Redis only)
 4. Yield Sample objects for Prometheus exposition format
 
 ## Configuration
@@ -169,9 +171,9 @@ Both backends use identical test patterns to ensure compatibility:
 
 **Persistence Tests**: Verify data persists by creating new registry/metric instances and reading from storage.
 
-**Expiration Tests**: Verify TTL behavior and that all metric components expire together atomically.
+**Expiration Tests** (Redis only): Verify TTL behavior and that all metric components expire together atomically.
 
-**Time Mocking**: Tests mock `time.time()` (returns `1549444326.4298077`) for deterministic `_created` timestamps. The `test_expire` test temporarily unmocks time to verify actual expiration behavior.
+**Time Mocking**: Tests mock `time.time()` (returns `1549444326.4298077`) for deterministic `_created` timestamps. The `test_expire` test (Redis only) temporarily unmocks time to verify actual expiration behavior.
 
 ## Code Style
 
