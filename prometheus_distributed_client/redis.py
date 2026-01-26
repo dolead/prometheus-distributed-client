@@ -51,10 +51,6 @@ class ValueClass(MutexValue):
     def set(self, value, timestamp=None):
         conn = get_redis_conn()
         conn.hset(self._redis_key, self._redis_subkey, value)
-        conn.expire(self._redis_key, get_redis_expire())
-
-    def refresh_expire(self):
-        get_redis_conn().expire(self._redis_key, get_redis_expire())
 
     def set_exemplar(self, exemplar):
         raise NotImplementedError()
@@ -62,7 +58,6 @@ class ValueClass(MutexValue):
     def setnx(self, value):
         conn = get_redis_conn()
         conn.hsetnx(self._redis_key, self._redis_subkey, value)
-        conn.expire(self._redis_key, get_redis_expire())
 
     def get(self) -> Optional[float]:
         bvalue = get_redis_conn().hget(self._redis_key, self._redis_subkey)
@@ -71,7 +66,12 @@ class ValueClass(MutexValue):
         return float(bvalue.decode("utf8"))
 
 
-class Counter(prometheus_client.Counter):
+class RedisMetricMixin:
+    def _refresh_expire(self):
+        get_redis_conn().expire(get_redis_key(self._name), get_redis_expire())
+
+
+class Counter(RedisMetricMixin, prometheus_client.Counter):
     def _metric_init(self):
         self._value = ValueClass(
             self._type,
@@ -89,18 +89,17 @@ class Counter(prometheus_client.Counter):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
 
     def inc(
         self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
         self._created.setnx(time.time())
-        self._created.refresh_expire()
         return super().inc(amount, exemplar)
 
     def reset(self) -> None:
         self._value.set(0)
         self._created.set(time.time())
+        self._refresh_expire()
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
@@ -113,10 +112,9 @@ class Counter(prometheus_client.Counter):
                 json.loads(labels_json),
                 float(value.decode("utf8")),
             )
-        conn.expire(key, get_redis_expire())
 
 
-class Gauge(prometheus_client.Gauge):
+class Gauge(RedisMetricMixin, prometheus_client.Gauge):
     def _metric_init(self):
         self._value = ValueClass(
             self._type,
@@ -127,6 +125,10 @@ class Gauge(prometheus_client.Gauge):
             suffix="",
         )
 
+    def set(self, value):
+        self._refresh_expire()
+        return super().set(value)
+
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
@@ -141,7 +143,7 @@ class Gauge(prometheus_client.Gauge):
         conn.expire(key, get_redis_expire())
 
 
-class Summary(prometheus_client.Summary):
+class Summary(RedisMetricMixin, prometheus_client.Summary):
     def _metric_init(self):
         self._count = ValueClass(
             self._type,
@@ -167,10 +169,10 @@ class Summary(prometheus_client.Summary):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
 
     def observe(self, amount: float) -> None:
-        self._created.refresh_expire()
+        self._created.setnx(time.time())
+        self._refresh_expire()
         return super().observe(amount)
 
     def _samples(self) -> Iterable[Sample]:
@@ -187,7 +189,7 @@ class Summary(prometheus_client.Summary):
         conn.expire(key, get_redis_expire())
 
 
-class Histogram(prometheus_client.Histogram):
+class Histogram(RedisMetricMixin, prometheus_client.Histogram):
     def _metric_init(self):
         self._buckets = []
         self._created = ValueClass(
@@ -198,7 +200,6 @@ class Histogram(prometheus_client.Histogram):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
         bucket_labelnames = self._labelnames + ("le",)
         self._count = ValueClass(
             self._type,
@@ -232,6 +233,7 @@ class Histogram(prometheus_client.Histogram):
         self, amount: float, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
         """Observe the given amount."""
+        self._created.setnx(time.time())
         self._sum.inc(amount)
         for i, bound in enumerate(self._upper_bounds):
             if amount <= bound:
@@ -239,7 +241,7 @@ class Histogram(prometheus_client.Histogram):
             else:
                 self._buckets[i].inc(0)
         self._count.inc(1)
-        self._created.refresh_expire()
+        self._refresh_expire()
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
@@ -252,4 +254,3 @@ class Histogram(prometheus_client.Histogram):
                 json.loads(labels_json),
                 float(value.decode("utf8")),
             )
-        conn.expire(key, get_redis_expire())
