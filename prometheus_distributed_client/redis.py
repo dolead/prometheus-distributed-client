@@ -81,7 +81,7 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
             help_text=self._documentation,
             suffix="_total",
         )
-        self._created = ValueClass(
+        self._redis_created = ValueClass(
             "gauge",
             self._name,
             self._labelnames,
@@ -93,12 +93,12 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
     def inc(
         self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
-        self._created.setnx(time.time())
+        self._redis_created.setnx(time.time())
         return super().inc(amount, exemplar)
 
     def reset(self) -> None:
         self._value.set(0)
-        self._created.set(time.time())
+        self._redis_created.set(time.time())
         self._refresh_expire()
 
     def _samples(self) -> Iterable[Sample]:
@@ -161,7 +161,7 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
             help_text=self._documentation,
             suffix="_sum",
         )
-        self._created = ValueClass(
+        self._redis_created = ValueClass(
             "gauge",
             self._name,
             self._labelnames,
@@ -171,7 +171,7 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
         )
 
     def observe(self, amount: float) -> None:
-        self._created.setnx(time.time())
+        self._redis_created.setnx(time.time())
         self._refresh_expire()
         return super().observe(amount)
 
@@ -192,7 +192,7 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
 class Histogram(RedisMetricMixin, prometheus_client.Histogram):
     def _metric_init(self):
         self._buckets = []
-        self._created = ValueClass(
+        self._redis_created = ValueClass(
             "gauge",
             self._name,
             self._labelnames,
@@ -233,7 +233,7 @@ class Histogram(RedisMetricMixin, prometheus_client.Histogram):
         self, amount: float, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
         """Observe the given amount."""
-        self._created.setnx(time.time())
+        self._redis_created.setnx(time.time())
         self._sum.inc(amount)
         for i, bound in enumerate(self._upper_bounds):
             if amount <= bound:

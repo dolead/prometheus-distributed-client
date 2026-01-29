@@ -127,7 +127,7 @@ class PDCTestCase(unittest.TestCase):
         assert 1 == metric._value.get()
         time.sleep(2)
         assert metric._value.get() is None
-        assert metric._created.get() is None
+        assert metric._redis_created.get() is None
 
     def test_prefix(self):
         setup(Redis(**self._get_redis_creds()), redis_prefix="patang")
@@ -136,7 +136,7 @@ class PDCTestCase(unittest.TestCase):
         )
         ametric.inc()
         assert 1 == ametric._value.get()
-        assert ametric._created.get() is not None
+        assert ametric._redis_created.get() is not None
 
         setup(Redis(**self._get_redis_creds()), redis_prefix="eki")
         bmetric = redis.Counter(
@@ -145,11 +145,11 @@ class PDCTestCase(unittest.TestCase):
         bmetric.inc(10)
 
         assert 10 == bmetric._value.get()
-        assert bmetric._created.get() is not None
+        assert bmetric._redis_created.get() is not None
 
         setup(Redis(**self._get_redis_creds()), redis_prefix="patang")
         assert 1 == ametric._value.get()
-        assert ametric._created.get() is not None
+        assert ametric._redis_created.get() is not None
 
     def test_counter_expired_created(self):
         "testing that _created gets refresh on inc"
@@ -163,7 +163,7 @@ class PDCTestCase(unittest.TestCase):
         metric.inc(1)
         time.sleep(1)
         assert metric._value.get() is not None
-        assert metric._created.get() is not None
+        assert metric._redis_created.get() is not None
 
     def test_summary_expired_created(self):
         "testing that _created gets refresh on observe"
@@ -179,7 +179,7 @@ class PDCTestCase(unittest.TestCase):
         time.sleep(1)
         assert metric._sum.get() is not None
         assert metric._count.get() is not None
-        assert metric._created.get() is not None
+        assert metric._redis_created.get() is not None
 
     def test_histogram_expired_created(self):
         "testing that _created gets refresh on observe"
@@ -195,4 +195,4 @@ class PDCTestCase(unittest.TestCase):
         time.sleep(1)
         assert metric._sum.get() is not None
         assert metric._count.get() is not None
-        assert metric._created.get() is not None
+        assert metric._redis_created.get() is not None
