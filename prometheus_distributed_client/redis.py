@@ -113,6 +113,9 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
                 float(value.decode("utf8")),
             )
 
+    _child_samples = _samples
+    _multi_samples = _samples
+
 
 class Gauge(RedisMetricMixin, prometheus_client.Gauge):
     def _metric_init(self):
@@ -141,6 +144,9 @@ class Gauge(RedisMetricMixin, prometheus_client.Gauge):
                 float(value.decode("utf8")),
             )
         conn.expire(key, get_redis_expire())
+
+    _child_samples = _samples
+    _multi_samples = _samples
 
 
 class Summary(RedisMetricMixin, prometheus_client.Summary):
@@ -187,6 +193,9 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
                 float(value.decode("utf8")),
             )
         conn.expire(key, get_redis_expire())
+
+    _child_samples = _samples
+    _multi_samples = _samples
 
 
 class Histogram(RedisMetricMixin, prometheus_client.Histogram):
@@ -254,3 +263,6 @@ class Histogram(RedisMetricMixin, prometheus_client.Histogram):
                 json.loads(labels_json),
                 float(value.decode("utf8")),
             )
+
+    _child_samples = _samples
+    _multi_samples = _samples

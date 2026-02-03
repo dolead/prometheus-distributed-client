@@ -171,6 +171,9 @@ class Counter(prometheus_client.Counter):
                 float(value),
             )
 
+    _child_samples = _samples
+    _multi_samples = _samples
+
 
 class Gauge(prometheus_client.Gauge):
     def _metric_init(self):
@@ -203,6 +206,9 @@ class Gauge(prometheus_client.Gauge):
                 json.loads(labels_json),
                 float(value),
             )
+
+    _child_samples = _samples
+    _multi_samples = _samples
 
 
 class Summary(prometheus_client.Summary):
@@ -257,6 +263,9 @@ class Summary(prometheus_client.Summary):
                 json.loads(labels_json),
                 float(value),
             )
+
+    _child_samples = _samples
+    _multi_samples = _samples
 
 
 class Histogram(prometheus_client.Histogram):
@@ -333,3 +342,6 @@ class Histogram(prometheus_client.Histogram):
                 json.loads(labels_json),
                 float(value),
             )
+
+    _child_samples = _samples
+    _multi_samples = _samples
