@@ -39,7 +39,9 @@ class ValueClass(MutexValue):
     @property
     def _redis_subkey(self):
         labels_json = json.dumps(
-            dict(zip(self.__labelnames, self.__labelvalues)), sort_keys=True
+            dict(zip(self.__labelnames, self.__labelvalues)),
+            sort_keys=True,
+            separators=(',', ':')
         )
         return f"{self.__suffix}:{labels_json}"
 
@@ -104,7 +106,7 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
+        for field, value in sorted(conn.hgetall(key).items()):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -135,7 +137,7 @@ class Gauge(RedisMetricMixin, prometheus_client.Gauge):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
+        for field, value in sorted(conn.hgetall(key).items()):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -184,7 +186,7 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
+        for field, value in sorted(conn.hgetall(key).items()):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -255,7 +257,7 @@ class Histogram(RedisMetricMixin, prometheus_client.Histogram):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in conn.hgetall(key).items():
+        for field, value in sorted(conn.hgetall(key).items()):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(

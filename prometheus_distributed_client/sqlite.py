@@ -39,7 +39,9 @@ class ValueClass(MutexValue):
     @property
     def _sqlite_subkey(self):
         labels_json = json.dumps(
-            dict(zip(self.__labelnames, self.__labelvalues)), sort_keys=True
+            dict(zip(self.__labelnames, self.__labelvalues)),
+            sort_keys=True,
+            separators=(',', ':')
         )
         return f"{self.__suffix}:{labels_json}"
 
