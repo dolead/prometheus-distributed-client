@@ -6,7 +6,7 @@ author = {name="François Schmidts", email="francois@schmidts.fr"}
 license = "GPLv3"
 readme = "README.md"
 packages = [{include = "prometheus_distributed_client"}]
-requires-python= ">=3.9,<4.0"
+requires-python= ">=3.10,<4.0"
 dependencies = [
     "prometheus-client==0.23.*",
     "redis>=5",
@@ -15,6 +15,9 @@ dependencies = [
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.2.1"
 mock = "^5.0.1"
+pycodestyle = "^2.14.0"
+flake8 = "^7.3.0"
+pylint = "^4.0.4"
 
 [build-system]
 requires = ["poetry-core"]

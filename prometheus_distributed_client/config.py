@@ -1,5 +1,5 @@
 import sqlite3
-from typing import Union, Optional
+from typing import Optional, Union
 
 from redis import Redis
 
@@ -60,16 +60,14 @@ def setup(
 
         # Create table if it doesn't exist
         cursor = conn.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS metrics (
                 metric_key TEXT NOT NULL,
                 subkey TEXT NOT NULL,
                 value REAL NOT NULL,
                 PRIMARY KEY (metric_key, subkey)
             )
-            """
-        )
+            """)
         conn.commit()
 
         _CONFIG["sqlite"] = conn

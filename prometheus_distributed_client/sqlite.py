@@ -41,7 +41,7 @@ class ValueClass(MutexValue):
         labels_json = json.dumps(
             dict(zip(self.__labelnames, self.__labelvalues)),
             sort_keys=True,
-            separators=(',', ':')
+            separators=(",", ":"),
         )
         return f"{self.__suffix}:{labels_json}"
 
