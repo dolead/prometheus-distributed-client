@@ -95,7 +95,8 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
     def inc(
         self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
-        self._redis_created.setnx(time.time())
+        if self._redis_created.setnx(time.time()):
+            self._value.set(0)
         return super().inc(amount, exemplar)
 
     def reset(self) -> None:
@@ -240,17 +241,21 @@ class Histogram(RedisMetricMixin, prometheus_client.Histogram):
                 )
             )
 
+    def reset(self):
+        self._sum.set(0)
+        for i in range(len(self._upper_bounds)):
+            self._buckets[i].set(0)
+        self._count.set(0)
+
     def observe(
         self, amount: float, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
         """Observe the given amount."""
-        self._redis_created.setnx(time.time())
+        if self._redis_created.setnx(time.time()):
+            self.reset()
         self._sum.inc(amount)
         for i, bound in enumerate(self._upper_bounds):
-            if amount <= bound:
-                self._buckets[i].inc(1)
-            else:
-                self._buckets[i].inc(0)
+            self._buckets[i].inc(1 if amount <= bound else 0)
         self._count.inc(1)
         self._refresh_expire()
 
