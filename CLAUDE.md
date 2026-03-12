@@ -180,3 +180,25 @@ Both backends use identical test patterns to ensure compatibility:
 - Black formatting with 79 character line length (target: Python 3.13)
 - pycodestyle with ignored errors: E126, E127, E128, W503
 - Type hints are used but mypy is currently disabled
+
+## Commit Convention
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>(<scope>): <subject>
+```
+
+**Types:** `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `test`, `perf`, `ci`
+
+- Keep the subject line under 50 characters
+- Use `!` after the scope for breaking changes (e.g., `feat(models)!: remove address column`)
+- Add `BREAKING CHANGE:` in the body when applicable
+- **Never** add `Co-Authored-By` or co-author trailers to commit messages
+
+Examples:
+```
+feat(redis): add batch observe for histograms
+fix(sqlite): prevent race condition in setnx
+chore: upgrade pytest to 8.x
+```
