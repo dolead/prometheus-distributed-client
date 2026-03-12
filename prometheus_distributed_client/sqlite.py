@@ -139,18 +139,18 @@ class Counter(prometheus_client.Counter):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
+        self._created.setnx(time.time())  # type: ignore[attr-defined]
 
     def inc(
         self, amount: float = 1, exemplar: Optional[Dict[str, str]] = None
     ) -> None:
-        self._created.setnx(time.time())
-        self._created.refresh_expire()
+        self._created.setnx(time.time())  # type: ignore[attr-defined]
+        self._created.refresh_expire()  # type: ignore[attr-defined]
         return super().inc(amount, exemplar)
 
     def reset(self) -> None:
         self._value.set(0)
-        self._created.set(time.time())
+        self._created.set(time.time())  # type: ignore[attr-defined]
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()
@@ -239,10 +239,10 @@ class Summary(prometheus_client.Summary):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
+        self._created.setnx(time.time())  # type: ignore[attr-defined]
 
     def observe(self, amount: float) -> None:
-        self._created.refresh_expire()
+        self._created.refresh_expire()  # type: ignore[attr-defined]
         return super().observe(amount)
 
     def _samples(self) -> Iterable[Sample]:
@@ -281,7 +281,7 @@ class Histogram(prometheus_client.Histogram):
             help_text=self._documentation,
             suffix="_created",
         )
-        self._created.setnx(time.time())
+        self._created.setnx(time.time())  # type: ignore[attr-defined]
         bucket_labelnames = self._labelnames + ("le",)
         self._count = ValueClass(
             self._type,
@@ -322,7 +322,7 @@ class Histogram(prometheus_client.Histogram):
             else:
                 self._buckets[i].inc(0)
         self._count.inc(1)
-        self._created.refresh_expire()
+        self._created.refresh_expire()  # type: ignore[attr-defined]
 
     def _samples(self) -> Iterable[Sample]:
         conn = get_sqlite_conn()

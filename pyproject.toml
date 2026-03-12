@@ -3,7 +3,7 @@ name = "prometheus-distributed-client"
 version = "2.1.5"
 description = ""
 author = {name="François Schmidts", email="francois@schmidts.fr"}
-license = "GPLv3"
+license = "GPL-3.0-only"
 readme = "README.md"
 packages = [{include = "prometheus_distributed_client"}]
 requires-python= ">=3.10,<4.0"
@@ -13,11 +13,12 @@ dependencies = [
 ]
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.2.1"
+pytest = "^8.0"
 mock = "^5.0.1"
 pycodestyle = "^2.14.0"
 flake8 = "^7.3.0"
 pylint = "^4.0.4"
+mypy = "^1.19.1"
 
 [build-system]
 requires = ["poetry-core"]

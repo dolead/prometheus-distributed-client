@@ -2,7 +2,7 @@
 # This is the only file that changes per project.
 
 # Source code path: a directory (mypackage/) or a single file (mymodule.py)
-CODE = prometheus-distributed-client
+CODE = prometheus_distributed_client
 
 # Test command — override if you need custom flags or paths
 TEST_CMD = poetry run pytest tests/

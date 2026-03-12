@@ -1,9 +1,9 @@
 import sqlite3
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from redis import Redis
 
-_CONFIG = {}
+_CONFIG: Dict[str, Any] = {}
 
 
 def setup(
@@ -78,7 +78,7 @@ def setup(
 # Backward compatibility alias
 def setup_sqlite(sqlite: Union[sqlite3.Connection, str]):
     """Deprecated: Use setup() instead."""
-    setup(sqlite)
+    setup(sqlite=sqlite)
 
 
 def get_redis_conn() -> Redis:

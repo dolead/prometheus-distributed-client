@@ -64,8 +64,8 @@ class ValueClass(MutexValue):
     def get(self) -> Optional[float]:
         bvalue = get_redis_conn().hget(self._redis_key, self._redis_subkey)
         if not bvalue:
-            return bvalue
-        return float(bvalue.decode("utf8"))
+            return None
+        return float(bvalue.decode("utf8"))  # type: ignore[union-attr]
 
 
 class RedisMetricMixin:
@@ -107,7 +107,9 @@ class Counter(RedisMetricMixin, prometheus_client.Counter):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in sorted(conn.hgetall(key).items()):
+        for field, value in sorted(
+            conn.hgetall(key).items()  # type: ignore[union-attr]
+        ):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -138,7 +140,9 @@ class Gauge(RedisMetricMixin, prometheus_client.Gauge):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in sorted(conn.hgetall(key).items()):
+        for field, value in sorted(
+            conn.hgetall(key).items()  # type: ignore[union-attr]
+        ):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -187,7 +191,9 @@ class Summary(RedisMetricMixin, prometheus_client.Summary):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in sorted(conn.hgetall(key).items()):
+        for field, value in sorted(
+            conn.hgetall(key).items()  # type: ignore[union-attr]
+        ):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
@@ -262,7 +268,9 @@ class Histogram(RedisMetricMixin, prometheus_client.Histogram):
     def _samples(self) -> Iterable[Sample]:
         conn = get_redis_conn()
         key = get_redis_key(self._name)
-        for field, value in sorted(conn.hgetall(key).items()):
+        for field, value in sorted(
+            conn.hgetall(key).items()  # type: ignore[union-attr]
+        ):
             field_str = field.decode("utf8")
             suffix, labels_json = field_str.split(":", 1)
             yield Sample(
